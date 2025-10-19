@@ -26,7 +26,7 @@ export default {
         pending = data ?? [];
       } else {
         // fallback to prisma
-  pending = await prisma.userMountain.findMany({ where: { approved: false }, orderBy: { created_at: 'desc' }, take: 10 });
+        pending = await prisma.userMountain.findMany({ where: { approved: false }, orderBy: { created_at: 'desc' }, take: 10 });
       }
 
       if (!pending || pending.length === 0) {
@@ -34,53 +34,71 @@ export default {
         return;
       }
 
-      // show the first pending item with Approve/Reject buttons; collector handles actions and iterates
-      let idx = 0;
+      // 選択状態を管理
+      let selected: Record<string, boolean> = {};
+      pending.forEach(item => { selected[item.id] = false; });
 
-      const buildMessage = async (i: number) => {
-        const item = pending[i];
-        const embed = formatEmbed(item.name ?? '無題', `${item.description ?? ''}\n\n標高: ${item.elevation ?? '不明'}\n追加者: ${item.added_by ?? '不明'}\nID: ${item.id}`) as EmbedBuilder;
-        const approve = new ButtonBuilder().setCustomId('approve_yes').setLabel('承認').setStyle(ButtonStyle.Success);
-        const reject = new ButtonBuilder().setCustomId('approve_no').setLabel('却下').setStyle(ButtonStyle.Danger);
-        const row = new ActionRowBuilder<ButtonBuilder>().addComponents(approve, reject);
-        return { embeds: [embed], components: [row] };
+      // embedリストとボタン群を生成
+      const buildMessage = async () => {
+        const embeds = pending.map((item, idx) => {
+          let addedByText = item.added_by ?? '不明';
+          if (item.discord_id) {
+            try {
+              const user = interaction.client.users.cache.get(String(item.discord_id));
+              if (user) addedByText = `${user.username}#${user.discriminator}`;
+              else addedByText = `<@${String(item.discord_id)}>`;
+            } catch (_) {
+              addedByText = `<@${String(item.discord_id)}>`;
+            }
+          }
+          return formatEmbed(
+            `${selected[item.id] ? '✅ ' : ''}${item.name ?? '無題'} (${idx + 1})`,
+            `${item.description ?? ''}\n標高: ${item.elevation ?? '不明'}\n追加者: ${addedByText}\nID: ${item.id}`
+          ) as EmbedBuilder;
+        });
+        // 各山ごとに選択トグルボタン
+        const rows = [];
+        for (let i = 0; i < pending.length; i += 5) {
+          const btns = pending.slice(i, i + 5).map(item =>
+            new ButtonBuilder()
+              .setCustomId(`toggle_${item.id}`)
+              .setLabel(`${selected[item.id] ? '選択解除' : '選択'}`)
+              .setStyle(selected[item.id] ? ButtonStyle.Secondary : ButtonStyle.Primary)
+          );
+          rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...btns).toJSON());
+        }
+        // 一括承認ボタン
+        const approveBtn = new ButtonBuilder()
+          .setCustomId('approve_selected')
+          .setLabel('選択した山を一括承認')
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(!Object.values(selected).some(v => v));
+        rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(approveBtn).toJSON());
+        return { embeds, components: rows };
       };
 
-      const initial = await buildMessage(0);
-      const msg = await interaction.editReply(initial) as any;
-
+      let msg = await interaction.editReply(await buildMessage()) as any;
       const collector = msg.createMessageComponentCollector({ componentType: ComponentType.Button, time: 1000 * 60 * 5 });
 
       collector.on('collect', async (btn: any) => {
         try {
           await btn.deferUpdate();
-          if (btn.customId === 'approve_yes') {
-            const item = pending[idx];
-            if (supabase) {
-              await supabase.from('user_mountains').update({ approved: true }).eq('id', item.id);
-            } else {
-              await prisma.userMountain.update({ where: { id: item.id }, data: { approved: true } });
+          if (btn.customId.startsWith('toggle_')) {
+            const id = btn.customId.replace('toggle_', '');
+            selected[id] = !selected[id];
+            await interaction.editReply(await buildMessage());
+          } else if (btn.customId === 'approve_selected') {
+            const toApprove = pending.filter(item => selected[item.id]);
+            for (const item of toApprove) {
+              if (supabase) {
+                await supabase.from('user_mountains').update({ approved: true }).eq('id', item.id);
+              } else {
+                await prisma.userMountain.update({ where: { id: item.id }, data: { approved: true } });
+              }
             }
-            await btn.followUp({ content: `承認しました: ${item.name}`, ephemeral: true });
-          } else if (btn.customId === 'approve_no') {
-            const item = pending[idx];
-            if (supabase) {
-              await supabase.from('user_mountains').delete().eq('id', item.id);
-            } else {
-              await prisma.userMountain.delete({ where: { id: item.id } });
-            }
-            await btn.followUp({ content: `却下しました: ${item.name}`, ephemeral: true });
-          }
-
-          // advance to next
-          idx += 1;
-          if (idx >= pending.length) {
+            await interaction.editReply({ content: `承認しました: ${toApprove.map(i => i.name).join(', ')}`, embeds: [], components: [] });
             collector.stop('done');
-            await interaction.editReply({ content: '全て処理しました。', embeds: [], components: [] });
-            return;
           }
-          const next = await buildMessage(idx);
-          await interaction.editReply(next);
         } catch (e: any) {
           log('admin_approve collect error:', e);
         }

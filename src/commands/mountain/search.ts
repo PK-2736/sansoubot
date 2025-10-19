@@ -1,11 +1,13 @@
 import { ChatInputCommandInteraction, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } from 'discord.js';
-import { searchMountains, BASE as MOUNTIX_BASE } from '../../utils/api/mountix';
+import { searchMountains, BASE as MOUNTIX_BASE, getMountain } from '../../utils/api/mountix';
 import { formatEmbed } from '../../utils/format';
 import { log } from '../../utils/logger';
 import fetchWikipediaImage, { fetchWikipediaSummary } from '../../utils/api/wiki';
 import { supabase } from '../../utils/db';
 import safeReply from '../../utils/discord';
 import { AttachmentBuilder } from 'discord.js';
+import { normalizeMountainData } from '../../utils/normalize';
+import { generateStaticMap } from '../../utils/api/map';
 
 const fetchImageAttachment = async (
   url?: string
@@ -32,27 +34,139 @@ const fetchImageAttachment = async (
 export default {
   data: { name: 'mountain_search' },
   async execute(interaction: ChatInputCommandInteraction) {
-  // Acknowledge early to keep the interaction valid; handle failure gracefully
+  // 長時間処理される可能性があるため早めに ACK して Interaction の有効期限切れを防ぎ、失敗を優雅に扱います
   if (!interaction.deferred && !interaction.replied) {
     try { await interaction.deferReply(); } catch (e: any) { log('mountain_search: deferReply failed at start:', e?.message ?? e); }
   }
-  const q = interaction.options?.getString && interaction.options.getString('q') ? interaction.options.getString('q')! : undefined;
   const nameOption = interaction.options?.getString && interaction.options.getString('name') ? interaction.options.getString('name')! : undefined;
-  const limitStr = interaction.options?.getString && interaction.options.getString('limit') ? interaction.options.getString('limit')! : undefined;
-    const limit = limitStr ? Math.min(50, Math.max(1, Number(limitStr) || 5)) : 10;
+  const idOption = interaction.options?.getString && interaction.options.getString('id') ? interaction.options.getString('id')! : undefined;
 
     try {
+  // id オプションが指定された場合、詳細な山情報を表示します（mountain_info の機能を統合）
+      if (idOption) {
+        const id = idOption;
+  // 1) まず Mountix を試します
+        let m: any = null;
+        let source = 'Mountix';
+        try {
+          m = await getMountain(id);
+        } catch (_) {
+          m = null;
+        }
+
+        let addedBy: string | undefined = undefined;
+        let addedByName: string | undefined = undefined;
+  // 2) 次に Supabase の user_mountains を確認します
+        if (!m && supabase) {
+          const qid = String(id).replace(/^user-/, '');
+          const { data } = await supabase.from('user_mountains').select('*').or(`id.eq.${qid},name.ilike.%${qid}%`).limit(1);
+          if (data && data.length) {
+            const d = data[0] as any;
+            m = { id: `user-${d.id}`, name: d.name, elevation: d.elevation, description: d.description, photo_url: d.photo_url, prefectures: [], coords: undefined };
+            source = 'Supabase';
+            addedBy = d.discord_id ?? d.added_by ?? undefined;
+            if (addedBy && interaction.client && typeof interaction.client.users?.fetch === 'function') {
+              try {
+                const user = await interaction.client.users.fetch(addedBy);
+                if (user) addedByName = `${user.username}#${user.discriminator}`;
+              } catch (_) {
+                addedByName = `<@${addedBy}>`;
+              }
+            }
+            if (!addedByName && addedBy) addedByName = `<@${addedBy}>`;
+          }
+        }
+
+  // 3) それでも見つからなければ Wikipedia をフォールバックとして試行します
+        if (!m) {
+          const summary = await fetchWikipediaSummary(id).catch(() => undefined);
+          if (summary) {
+            m = { id: `wiki-${summary.title}`, name: summary.title, elevation: undefined, description: summary.extract, photo_url: summary.originalimage?.source, prefectures: [], coords: undefined };
+            source = 'Wikipedia';
+            addedBy = 'Wikipedia';
+          }
+        }
+
+        if (!m) {
+          await safeReply(interaction, { content: '山情報が見つかりませんでした。', flags: (await import('../../utils/flags')).EPHEMERAL });
+          return;
+        }
+
+        const norm = normalizeMountainData({ id: m.id, name: m.name, elevation: m.elevation, coords: m.coords, description: m.description, photo_url: m.photo_url, source });
+        const lines = [
+          `名前: ${norm.name}`,
+          `標高: ${norm.elevation ?? '不明'} m`,
+          `場所: ${m.prefectures && m.prefectures.length ? m.prefectures.join(', ') : (m.gsiUrl ?? '不明')}`,
+          norm.description ? `\n${norm.description}` : '',
+          `\nソース: ${source}`,
+          addedByName ? `追加者: ${addedByName}` : (addedBy ? `追加者: ${addedBy}` : ''),
+        ];
+
+        const sourceLinks: string[] = [];
+        if (source === 'Mountix' && m.id) {
+          sourceLinks.push(`<${MOUNTIX_BASE}/mountains/${encodeURIComponent(String(m.id))}>`);
+        }
+        if (source === 'Supabase' && m.id) {
+          const rid = String(m.id).replace(/^user-/, '');
+          sourceLinks.push(`Supabase record ID: ${rid}`);
+        }
+
+        const embeds = [formatEmbed(norm.name, lines.join('\n')) as any];
+        let imageUrl: string | undefined = m.photo_url ?? undefined;
+        let wikiPageUrl: string | undefined;
+        if (!imageUrl && m.name) {
+          const wikiImage = await fetchWikipediaImage(m.name, (m as any).nameKana ?? undefined);
+          if (wikiImage) imageUrl = wikiImage;
+        }
+        try {
+          const summary = await fetchWikipediaSummary(m.name).catch(() => undefined);
+          if (summary) {
+            wikiPageUrl = summary.content_urls?.desktop?.page ?? summary.canonical_url ?? `https://ja.wikipedia.org/wiki/${encodeURIComponent(summary.title)}`;
+            if (wikiPageUrl) sourceLinks.push(`<${wikiPageUrl}>`);
+          }
+        } catch (e) { /* ignore */ }
+        if (!imageUrl && m.coords) {
+          imageUrl = generateStaticMap(m.coords, 12, '700x400');
+        }
+        const files: any[] = [];
+        if (imageUrl) {
+          try {
+            const fetched = await fetchImageAttachment(imageUrl).catch(() => undefined);
+            if (fetched) {
+              (embeds[0] as any).setImage?.(`attachment://${fetched.filename}`);
+              files.push(fetched.attachment);
+            } else {
+              (embeds[0] as any).setImage?.(imageUrl);
+            }
+          } catch (e: any) {
+            log('mountain_search (info branch): image attach fallback failed', String(e?.message ?? e));
+            (embeds[0] as any).setImage?.(imageUrl);
+          }
+        }
+        if (sourceLinks.length) (embeds[0] as any).addFields?.({ name: '出典リンク', value: sourceLinks.join('\n') });
+        if (wikiPageUrl) {
+          const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = await import('discord.js');
+          const wikiButton = new ButtonBuilder()
+            .setLabel('Wikipediaで詳しく見る')
+            .setStyle(ButtonStyle.Link)
+            .setURL(wikiPageUrl);
+          const wikiRow = new ActionRowBuilder().addComponents(wikiButton);
+          await safeReply(interaction, { embeds, files: files.length ? files : undefined, components: [wikiRow.toJSON()] });
+        } else {
+          await safeReply(interaction, { embeds, files: files.length ? files : undefined });
+        }
+        return;
+      }
       // 長時間処理する可能性があるため早めに defer して Interaction の有効期限切れを防ぐ
-      // defer is handled centrally in interactionCreate; do not defer again here to avoid double-ack
-  const params: any = { limit };
-  // 新: name オプションを優先、旧 q はフォールバック
+  // defer は interactionCreate 側で中央管理されています。ここで再度 defer して二重 ACK にならないように注意してください
+  const params: any = {};
+  // name オプションを優先して扱います
   if (nameOption) params.name = nameOption;
-  else if (q) params.name = q;
       // 追加オプション: tag / prefecture / offset / sort をオプションで渡す作りにしていればここで収集できます
 
       const rows = await searchMountains(params);
       if (!rows || rows.length === 0) {
-        await safeReply(interaction, { content: '一致する山が見つかりませんでした。', ephemeral: true });
+  await safeReply(interaction, { content: '一致する山が見つかりませんでした。', flags: (await import('../../utils/flags')).EPHEMERAL });
         return;
       }
 
@@ -60,10 +174,10 @@ export default {
       const perPage = 1; // 1件ずつ大きな画像で見せる
       const pages = Math.max(1, Math.ceil(rows.length / perPage));
 
-      // pre-resolve thumbnails and source links for all rows (sequentially to avoid spamming external APIs)
+  // すべての行についてサムネイルや出典リンクを事前解決（外部 API への負荷を避けるため逐次処理）
   const thumbs: (string | undefined)[] = [];
-  const sources: string[] = []; // text for source label
-  const sourceLinks: (string | undefined)[] = []; // URL or ID text
+  const sources: string[] = []; // 出典ラベル用テキスト
+  const sourceLinks: (string | undefined)[] = []; // URL または ID 文字列
   const addedBys: (string | undefined)[] = [];
   for (const r of rows) {
         // thumbnail
@@ -73,7 +187,7 @@ export default {
           thumbs.push(wikiImg ?? undefined);
         }
 
-        // determine source: user-* prefix for Supabase user_mountains
+  // 出典を判定: Supabase の user レコードは id に 'user-' プレフィックスを付与しています
         const rid = String(r.id ?? '');
         if (rid.startsWith('user-')) {
           sources.push('Supabase');
@@ -82,9 +196,23 @@ export default {
           sourceLinks.push(`Supabase record: \`${uid}\``);
           if (supabase) {
             try {
-              const { data } = await supabase.from('user_mountains').select('added_by').eq('id', uid).maybeSingle();
-              const ab = (data as any)?.added_by ?? undefined;
-              addedBys.push(ab ? String(ab) : undefined);
+              const { data } = await supabase.from('user_mountains').select('added_by,discord_id').eq('id', uid).maybeSingle();
+              const row = data as any;
+              let display: string | undefined = undefined;
+              if (row) {
+                if (row.discord_id) {
+                  // try to fetch Discord username
+                          try {
+                            const user = await interaction.client.users.fetch(String(row.discord_id));
+                            display = `${user.username}#${user.discriminator}`;
+                          } catch (_) {
+                            display = `<@${String(row.discord_id)}>`;
+                          }
+                } else if (row.added_by) {
+                  display = String(row.added_by);
+                }
+              }
+              addedBys.push(display);
             } catch (e) {
               addedBys.push(undefined);
             }
@@ -101,31 +229,33 @@ export default {
           addedBys.push(undefined);
         }
 
-        // try to get a wikipedia page url for better provenance
+  // 出典の裏取りのため Wikipedia のページ URL を取得しておきます
         try {
           const summary = await fetchWikipediaSummary(r.name).catch(() => undefined);
           if (summary) {
             const wikiPage = summary.content_urls?.desktop?.page ?? summary.canonical_url ?? `https://ja.wikipedia.org/wiki/${encodeURIComponent(summary.title)}`;
-            // prefer to append wiki URL to existing sourceLinks (as URL)
+            // 取得した Wikipedia URL を既存の sourceLinks に優先して追加します
             const prev = sourceLinks[sourceLinks.length - 1];
             sourceLinks[sourceLinks.length - 1] = prev ? `${prev}\n<${wikiPage}>` : `<${wikiPage}>`;
           }
         } catch (_) {
-          // ignore wiki failures
+          // Wiki の取得に失敗しても無視します
         }
       }
 
       const buildEmbed = (pageIndex: number) => {
-        const idx = pageIndex * perPage;
-        const r = rows[idx];
-        const desc = `${r.name} — ${r.elevation ?? '不明'} m — ${r.prefectures?.join ? r.prefectures.join(', ') : '不明'}\n(id: ${r.id})`;
-        const eb = formatEmbed(`${r.name} — ${idx + 1}/${rows.length}`, desc) as any;
-        // 大きい画像をメイン画像として表示（thumbnail ではなく embed image）
+  const idx = pageIndex * perPage;
+  const r = rows[idx];
+      const shortDesc = r.description ? (String(r.description).replace(/\s+/g,' ').slice(0,140) + (String(r.description).length > 140 ? '…' : '')) : '';
+      const place = r.prefectures?.join ? r.prefectures.join(', ') : '不明';
+      const desc = `${r.name} — ${r.elevation ?? '不明'} m — ${place}` + (shortDesc ? `\n\n${shortDesc}` : '');
+  const eb = formatEmbed(`${r.name} — ${idx + 1}/${rows.length}`, desc) as any;
+  // サムネイルではなく大きめの画像を embed のメイン画像として表示します
         if (thumbs[idx]) {
           log('mountain_search: setting image for', r.name, thumbs[idx]);
           eb.setImage?.(thumbs[idx]);
         }
-        // add source information similar to /mountain_info
+  // /mountain_info と同様の出典情報を追加します
         const srcLabel = sources[idx] ?? '不明';
         const srcLinkText = sourceLinks[idx];
         const addedBy = addedBys[idx];
@@ -136,7 +266,7 @@ export default {
           if (addedBy) parts.push(`追加者: \`${addedBy}\``);
           eb.addFields?.({ name: '出典', value: parts.join('\n') });
         } catch (_) {
-          // ignore if addFields not available
+          // addFields が使えない場合は無視します
         }
         return eb;
       };
@@ -147,7 +277,7 @@ export default {
       const nextButton = new ButtonBuilder().setCustomId('next').setLabel('次へ ▶️').setStyle(ButtonStyle.Primary).setDisabled(pages <= 1);
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(prevButton, nextButton);
 
-      // attempt to attach the initial image as a file fallback and use attachment:// if available
+  // 最初の画像をファイルとして添付できるか試み、可能なら attachment:// を使用します（フォールバック）
       const initialFiles: any[] = [];
       try {
         const imgUrl = thumbs[0];
@@ -163,8 +293,24 @@ export default {
         // ignore
       }
 
-      await safeReply(interaction, { embeds: [initialEmbed], components: [row], files: initialFiles.length ? initialFiles : undefined });
-      // fetch the message object to create collector
+      // Wikipediaページボタンを初期表示に追加
+      const idx = 0;
+      const wikiMatch = sourceLinks[idx]?.match(/<([^>]+wikipedia[^>]+)>/i);
+      let wikiRow;
+      if (wikiMatch) {
+        const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = await import('discord.js');
+        const wikiButton = new ButtonBuilder()
+          .setLabel('Wikipediaで詳しく見る')
+          .setStyle(ButtonStyle.Link)
+          .setURL(wikiMatch[1]);
+        wikiRow = new ActionRowBuilder().addComponents(wikiButton);
+      }
+      await safeReply(interaction, {
+        embeds: [initialEmbed],
+        components: wikiRow ? [row.toJSON(), wikiRow?.toJSON()] : [row.toJSON()],
+        files: initialFiles.length ? initialFiles : undefined
+      });
+  // メッセージオブジェクトを取得してコンポーネントコレクタを作成します
       const message = (await interaction.fetchReply()) as any;
       const collector = message.createMessageComponentCollector({ componentType: ComponentType.Button, time: 120_000 });
       let current = 0;
@@ -177,7 +323,21 @@ export default {
           prevButton.setDisabled(current <= 0);
           nextButton.setDisabled(current >= pages - 1);
           const newRow = new ActionRowBuilder<ButtonBuilder>().addComponents(prevButton, nextButton);
-          await i.update({ embeds: [eb], components: [newRow] });
+  // ページ切り替え時に Wikipedia ボタンも更新します
+        const wikiMatch = sourceLinks[current]?.match(/<([^>]+wikipedia[^>]+)>/i);
+        let wikiRow;
+        if (wikiMatch) {
+          const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = await import('discord.js');
+          const wikiButton = new ButtonBuilder()
+            .setLabel('Wikipediaで詳しく見る')
+            .setStyle(ButtonStyle.Link)
+            .setURL(wikiMatch[1]);
+          wikiRow = new ActionRowBuilder().addComponents(wikiButton);
+        }
+        await i.update({
+          embeds: [eb],
+          components: wikiRow ? [newRow.toJSON(), wikiRow?.toJSON()] : [newRow.toJSON()]
+        });
         } catch (err) {
           log('collector error:', err);
         }
@@ -190,7 +350,7 @@ export default {
           const finalRow = new ActionRowBuilder<ButtonBuilder>().addComponents(prevButton, nextButton);
           await message.edit({ components: [finalRow] });
         } catch (e) {
-          // ignore
+    // 失敗しても無視します
         }
       });
     } catch (err: any) {
@@ -198,9 +358,9 @@ export default {
       const msg = '検索に失敗しました。';
       try {
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: msg, ephemeral: true });
+          await interaction.followUp({ content: msg, flags: (await import('../../utils/flags')).EPHEMERAL });
         } else {
-          await interaction.reply({ content: msg, ephemeral: true });
+          await interaction.reply({ content: msg, flags: (await import('../../utils/flags')).EPHEMERAL });
         }
       } catch (_) {
         // ignore follow-up errors

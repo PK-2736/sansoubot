@@ -70,8 +70,8 @@ export function normalizeMountainData(input: RawMountainInput): NormalizedMounta
 
 /**
  * Nominatim を使った簡易ジオコーディング
- * locationText（住所や地名）から緯度経度を取得し、NormalizedMountain 形式で返す
- * 注意: 外部 API 呼び出しのため、rate limit と利用規約を守る必要があります。
+ * locationText（住所や地名）から緯度経度を取得し、NormalizedMountain 形式で返します。
+ * 注意: 外部 API 呼び出しを行うため、レート制限や利用規約を守ってください。
  */
 export async function geocodeLocation(locationText: string): Promise<{ coords?: [number, number]; display_name?: string } | undefined> {
   if (!locationText) return undefined;

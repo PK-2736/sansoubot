@@ -1,0 +1,5 @@
+{
+  "default": ["*"],
+  "802345513495822336": ["*"],
+  "123456789012345678": ["help", "ping", "admin_approve", "mountain_add", "mountain_search", "weather_forecast", "quiz_start", "quiz_rank"]
+}

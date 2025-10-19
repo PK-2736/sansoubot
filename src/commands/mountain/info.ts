@@ -7,12 +7,14 @@ import fetchWikipediaImage from '../../utils/api/wiki';
 import { log } from '../../utils/logger';
 import { normalizeMountainData } from '../../utils/normalize';
 import safeReply from '../../utils/discord';
-import fetchImageAttachment from '../../utils/image';
+// '../../utils/image' モジュールが無い場合のフォールバック: undefined を返して外部画像 URL を使用するようにします。
+// 実装があれば置き換えてください。
+const fetchImageAttachment = async (_url: string): Promise<{ filename: string; attachment: unknown } | undefined> => undefined;
 
 export default {
   data: { name: 'mountain_info' },
   async execute(interaction: ChatInputCommandInteraction) {
-    // Acknowledge early to prevent token expiration during long processing
+  // 長時間の処理中にトークンが期限切れにならないよう早めに ACK します
     if (!interaction.deferred && !interaction.replied) {
       try { await interaction.deferReply(); } catch (e: any) { log('mountain_info: deferReply failed at start:', e?.message ?? e); }
     }
@@ -21,12 +23,12 @@ export default {
       : undefined;
 
     if (!id) {
-      await interaction.reply({ content: '山IDまたは山名を指定してください。', ephemeral: true });
+  await interaction.reply({ content: '山IDまたは山名を指定してください。', flags: (await import('../../utils/flags')).EPHEMERAL });
       return;
     }
 
     try {
-      // 1) Try Mountix first
+  // 1) まず Mountix を試行します
       let m = null as any;
       let source = 'Mountix';
       try {
@@ -35,8 +37,9 @@ export default {
         m = null;
       }
 
-      // 2) If not found, try Supabase user_mountains by id or name
-      let addedBy: string | undefined = undefined;
+  // 2) 見つからない場合は Supabase の user_mountains を id または名前で検索します
+  let addedBy: string | undefined = undefined;
+  let addedByName: string | undefined = undefined;
       if (!m) {
         if (supabase) {
           // if id looks like user-<uuid> (used in search merge), strip prefix
@@ -46,12 +49,25 @@ export default {
             const d = data[0] as any;
             m = { id: `user-${d.id}`, name: d.name, elevation: d.elevation, description: d.description, photo_url: d.photo_url, prefectures: [], coords: undefined };
             source = 'Supabase';
-            addedBy = d.added_by;
+            // Supabase は Discord のスノーフレークを 'added_by' または 'discord_id' のいずれかに格納している可能性があります
+            addedBy = d.discord_id ?? d.added_by ?? undefined;
+            // Discord ユーザー名を取得
+            if (addedBy && interaction.client && typeof interaction.client.users?.fetch === 'function') {
+              try {
+                const user = await interaction.client.users.fetch(addedBy);
+                if (user) addedByName = `${user.username}#${user.discriminator}`;
+              } catch (_) {
+                // 取得失敗時はメンションでフォールバック
+                addedByName = `<@${addedBy}>`;
+              }
+            }
+            // 最終フォールバック: 名前が取得できない場合は ID をメンションとして表示します
+            if (!addedByName && addedBy) addedByName = `<@${addedBy}>`;
           }
         }
       }
 
-      // 3) If still not found, try Wikipedia summary
+  // 3) それでも見つからなければ Wikipedia のサマリーを試します
       let wikiSummary: any = undefined;
       if (!m) {
         wikiSummary = await fetchWikipediaImage(id) ? { } : undefined; // placeholder to check
@@ -72,10 +88,10 @@ export default {
         `場所: ${m.prefectures && m.prefectures.length ? m.prefectures.join(', ') : (m.gsiUrl ?? '不明')}`,
         norm.description ? `\n${norm.description}` : '',
         `\nソース: ${source}`,
-        addedBy ? `追加者: ${addedBy}` : '',
+        addedByName ? `追加者: ${addedByName}` : (addedBy ? `追加者: ${addedBy}` : ''),
       ];
 
-      // 出典リンク: Mountix / Supabase / Wikipedia
+  // 出典リンク: Mountix / Supabase / Wikipedia
       const sourceLinks: string[] = [];
       if (source === 'Mountix' && m.id) {
         sourceLinks.push(`<${MOUNTIX_BASE}/mountains/${encodeURIComponent(String(m.id))}>`);
@@ -87,14 +103,14 @@ export default {
       }
 
       const embeds = [formatEmbed(norm.name, lines.join('\n')) as any];
-      // 画像の優先順: Mountix / Supabase の photo_url -> Wikipedia の代表画像 -> Static Map
+  // 画像の優先順: Mountix / Supabase の photo_url -> Wikipedia の代表画像 -> Static Map
       let imageUrl: string | undefined = m.photo_url ?? undefined;
       let wikiPageUrl: string | undefined;
       if (!imageUrl && m.name) {
         const wikiImage = await fetchWikipediaImage(m.name, (m as any).nameKana ?? undefined);
         if (wikiImage) imageUrl = wikiImage;
       }
-      // Try to fetch summary to extract canonical URL and add to source links
+  // サマリーを取得して正規の URL を抽出し、出典リンクに追加します
       try {
         const summary = await (await import('../../utils/api/wiki')).fetchWikipediaSummary(m.name).catch(() => undefined);
         if (summary) {
@@ -109,14 +125,14 @@ export default {
   if (imageUrl) {
     log('mountain_info: setting imageUrl:', imageUrl);
     try {
-      // try to download image as attachment first
+  // まず画像を添付ファイルとしてダウンロードして添付できるか試みます
       const fetched = await fetchImageAttachment(imageUrl).catch(() => undefined);
       if (fetched) {
-        // use attachment:// so Discord will display the attached image
+  // Discord が添付画像を表示するように attachment:// を使用します
         (embeds[0] as any).setImage?.(`attachment://${fetched.filename}`);
         files.push(fetched.attachment);
       } else {
-        // fallback to external URL
+  // フォールバックとして外部 URL を使用します
         (embeds[0] as any).setImage?.(imageUrl);
       }
     } catch (e: any) {
@@ -126,10 +142,21 @@ export default {
   }
   if (sourceLinks.length) (embeds[0] as any).addFields?.({ name: '出典リンク', value: sourceLinks.join('\n') });
 
-      await safeReply(interaction, { embeds, files: files.length ? files : undefined });
+  // Wikipediaページボタンを追加
+  if (wikiPageUrl) {
+    const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = await import('discord.js');
+    const wikiButton = new ButtonBuilder()
+      .setLabel('Wikipediaで詳しく見る')
+      .setStyle(ButtonStyle.Link)
+      .setURL(wikiPageUrl);
+    const wikiRow = new ActionRowBuilder().addComponents(wikiButton);
+    await safeReply(interaction, { embeds, files: files.length ? files : undefined, components: [wikiRow.toJSON()] });
+  } else {
+    await safeReply(interaction, { embeds, files: files.length ? files : undefined });
+  }
     } catch (err: any) {
       log('mountain_info error:', err);
-      try { await safeReply(interaction, { content: '山情報の取得に失敗しました。', ephemeral: true }); } catch (_) {}
+  try { await safeReply(interaction, { content: '山情報の取得に失敗しました。', flags: (await import('../../utils/flags')).EPHEMERAL }); } catch (_) {}
     }
   },
 };

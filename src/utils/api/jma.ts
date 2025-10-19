@@ -2,37 +2,70 @@ import axios from 'axios';
 
 // 地域名 -> JMA 地域コードの簡易マップ（必要に応じて拡張してください）
 const areaCodeMap: Record<string, string> = {
-	'東京': '130000',
-	'東京都': '130000',
-	'札幌': '016010',
-	'北海道': '016000',
-	'大阪': '270000',
-	'大阪府': '270000',
-	'京都': '260000',
-	'福岡': '400000',
-	// 例: ユーザー指定のエリア名（地域区分）を追加
-	'知床・阿寒': '016000', // 簡易に北海道でマップ
+  // 主要な都道府県・代表都市の JMA 地域コード（簡易マップ）
+  '東京': '130000', '東京都': '130000', '東京地方': '130010',
+  '札幌': '016010', '北海道': '016000',
+  '大阪': '270000', '大阪府': '270000', '大阪府北部': '271000',
+  '京都': '260000', '京都府': '260000',
+  '名古屋': '230000', '愛知': '230000', '愛知県': '230000',
+  '横浜': '140010', '神奈川': '140000', '神奈川県': '140000',
+  '千葉': '120000', '千葉県': '120000',
+  '埼玉': '110000', '埼玉県': '110000',
+  '仙台': '040010', '宮城': '040000', '宮城県': '040000',
+  '長野': '200000', '長野県': '200000',
+  '新潟': '150000', '新潟県': '150000',
+  '富山': '160000', '富山県': '160000',
+  '石川': '170000', '石川県': '170000',
+  '静岡': '220000', '静岡県': '220000',
+  '広島': '340000', '広島県': '340000',
+  '福岡': '400000', '福岡県': '400000',
+  '熊本': '430000', '熊本県': '430000',
+  '鹿児島': '460000', '鹿児島県': '460000',
+  '沖縄': '471000', '沖縄県': '470000',
+  // 地方区分の簡易指定
+  '関東': '130000', '東北': '040000', '関西': '270000', '九州': '400000',
+  // 例: ユーザー指定のエリア名（地域区分）を追加
+  '知床・阿寒': '016000', // 簡易に北海道でマップ
 };
 
-// ユーザ入力（地域名またはコード）を JMA の地域コードに解決する
+// ユーザ入力（地域名またはコード）を JMA の地域コードに解決します
 export function resolveArea(input: string | undefined): string {
-	if (!input) return '130000';
-	const s = input.trim();
-	// 既に数字のみならコードとして返す
-	if (/^\d+$/.test(s)) return s;
-	// マップに存在すれば返す
-	const mapped = areaCodeMap[s];
-	if (mapped) return mapped;
-	// 部分一致（例: "北海道" が含まれる等）
-	for (const key of Object.keys(areaCodeMap)) {
-		if (s.includes(key)) return areaCodeMap[key];
-	}
-	// フォールバック
-	return '130000';
+  return resolveAreaVerbose(input).code;
+}
+
+export function resolveAreaVerbose(input: string | undefined): { code: string; normalized: string; matchedKey?: string } {
+  if (!input) return { code: '130000', normalized: '', matchedKey: undefined };
+  // normalize and strip spaces/punctuation
+  let s = input.trim().normalize('NFKC');
+  // remove common separators and control chars
+  s = s.replace(/[\u3000\s\t\n]+/g, '');
+  // remove trailing descriptors like 'の天気' or similar
+  s = s.replace(/の天気$|の予報$|天気$|予報$/g, '');
+  // if numeric
+  if (/^\d+$/.test(s)) return { code: s, normalized: s, matchedKey: undefined };
+
+  // try exact match
+  if (areaCodeMap[s]) return { code: areaCodeMap[s], normalized: s, matchedKey: s };
+
+  // try suffix trimming (県/府/都/市/地方)
+  const base = s.replace(/(県|府|都|市|地方)$/u, '');
+  if (base && areaCodeMap[base]) return { code: areaCodeMap[base], normalized: s, matchedKey: base };
+  if (areaCodeMap[base + '県']) return { code: areaCodeMap[base + '県'], normalized: s, matchedKey: base + '県' };
+  if (areaCodeMap[base + '府']) return { code: areaCodeMap[base + '府'], normalized: s, matchedKey: base + '府' };
+  if (areaCodeMap[base + '都']) return { code: areaCodeMap[base + '都'], normalized: s, matchedKey: base + '都' };
+  if (areaCodeMap[base + '市']) return { code: areaCodeMap[base + '市'], normalized: s, matchedKey: base + '市' };
+
+  // substring match any supported key
+  for (const key of Object.keys(areaCodeMap)) {
+    if (s.includes(key) || key.includes(s)) return { code: areaCodeMap[key], normalized: s, matchedKey: key };
+  }
+
+  // fallback
+  return { code: '130000', normalized: s, matchedKey: undefined };
 }
 
 /**
- * JMA のレスポンスを受け取り、人間向けの要約を返す。
+ * JMA のレスポンスを受け取り、人間向けの要約を返します。
  * fetchWeather は { raw, summary } を返します。
  */
 
