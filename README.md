@@ -14,7 +14,7 @@
 
 | 機能            | 内容                       | 利用サービス/API                 |
 | ------------- | ------------------------ | -------------------------- |
-| 🏔 山情報取得      | Mountix API + ユーザー登録山データ | Mountix API / Supabase     |
+| 🏔 山情報取得      | Mountix API + ユーザー登録山データ + wiki情報 | Mountix API / Supabase     |
 | ☁️ 天気情報       | 山域の天気予報・警報取得             | JMA Open Data API          |
 | 🗺 地図／ルート表示   | OSM + GSI から静的地図生成       | Leaflet / Static Map API   |
 | 🧗‍♂️ ユーザー投稿山 | 独自DBで管理・承認制              | Supabase                   |
