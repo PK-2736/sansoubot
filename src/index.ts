@@ -3,66 +3,58 @@ import { Client, GatewayIntentBits, ApplicationCommandOptionType } from 'discord
 import ready from './events/ready';
 import interactionCreate from './events/interactionCreate';
 import { log } from './utils/logger';
+import guildCreate from './events/guildCreate';
 
 // コマンドの取り込み
 import ping from './commands/ping';
 import help from './commands/help';
-import mountainInfo from './commands/mountain/info';
 import mountainAdd from './commands/mountain/add';
 import mountainSearch from './commands/mountain/search';
 import weatherForecast from './commands/weather/forecast';
 import mapRoute from './commands/map/route';
 import quizStart from './commands/quiz/start';
-import quizAnswer from './commands/quiz/answer';
+import quizRank from './commands/quiz/rank';
 import adminApprove from './commands/admin/approve';
 
 // 登録用のメタ情報（説明付き + オプション）
 const commandsForRegistration = [
   { name: ping.data.name, description: '疎通確認（Pong を返します）' },
   { name: help.data.name, description: 'Botのコマンド一覧を表示' },
-  {
-    name: mountainInfo.data.name,
-    description: '山の情報を表示（Mountixなどと連携予定）',
-    options: [
-      { name: 'id', description: 'Mountix の山ID（未指定時は例示）', type: ApplicationCommandOptionType.String, required: false },
-    ],
-  },
+  // mountain_info は mountain_search に統合されました（詳細は mountain_search の `id` オプションを使用してください）
   {
     name: mountainAdd.data.name,
     description: 'ユーザー投稿で山を追加（承認制）',
-    options: [
-      { name: 'name', description: '山名', type: ApplicationCommandOptionType.String, required: true },
-      { name: 'elevation', description: '標高（m）', type: ApplicationCommandOptionType.String, required: false },
-      { name: 'location', description: '場所', type: ApplicationCommandOptionType.String, required: false },
-      { name: 'description', description: '説明', type: ApplicationCommandOptionType.String, required: false },
-    ],
   },
   {
     name: mountainSearch.data.name,
     description: '山を検索',
     options: [
-      { name: 'q', description: '検索ワード（旧: 山名、非推奨）', type: ApplicationCommandOptionType.String, required: false },
       { name: 'name', description: '山名で検索（部分一致）', type: ApplicationCommandOptionType.String, required: false },
-      { name: 'limit', description: '取得件数', type: ApplicationCommandOptionType.String, required: false },
+  // limit オプションは削除されました
     ],
   },
   {
     name: weatherForecast.data.name,
     description: '山域の天気予報を表示',
     options: [
-      { name: 'area', description: 'JMA 地域コードまたは地域名', type: ApplicationCommandOptionType.String, required: false },
+  { name: 'lat', description: '緯度（例: 35.68）', type: ApplicationCommandOptionType.String, required: false },
+  { name: 'lon', description: '経度（例: 139.76）', type: ApplicationCommandOptionType.String, required: false },
+  { name: 'mountain', description: '山名または Mountix ID（例: 富士山, 1234）', type: ApplicationCommandOptionType.String, required: false },
     ],
   },
   {
     name: mapRoute.data.name,
     description: 'Static Mapなどでルート画像を生成',
     options: [
-      { name: 'lat', description: '緯度（例: 35.68）', type: ApplicationCommandOptionType.String, required: false },
-      { name: 'lon', description: '経度（例: 139.76）', type: ApplicationCommandOptionType.String, required: false },
+      { name: 'markers', description: '複数地点（;区切り）例: "lat,lon;lat2,lon2"', type: ApplicationCommandOptionType.String, required: false },
+      { name: 'path', description: 'ルート座標（;区切り）例: "lat,lon;lat2,lon2"', type: ApplicationCommandOptionType.String, required: false },
+      { name: 'zoom', description: 'ズームレベル（数値）', type: ApplicationCommandOptionType.String, required: false },
+      { name: 'size', description: '画像サイズ（例: 800x600）', type: ApplicationCommandOptionType.String, required: false },
+      { name: 'gpx', description: 'GPXファイルを添付（ファイル）', type: ApplicationCommandOptionType.Attachment, required: false },
     ],
   },
   { name: quizStart.data.name, description: '山クイズを開始' },
-  { name: quizAnswer.data.name, description: 'クイズへの回答' },
+  { name: quizRank.data.name, description: 'クイズのランキングを表示' },
   { name: adminApprove.data.name, description: 'ユーザー投稿山の承認（管理者用）' },
 ];
 
@@ -70,13 +62,12 @@ const commandsForRegistration = [
 const commandMap: Record<string, (i: any) => Promise<void>> = {
   [ping.data.name]: ping.execute,
   [help.data.name]: help.execute,
-  [mountainInfo.data.name]: mountainInfo.execute,
   [mountainAdd.data.name]: mountainAdd.execute,
   [mountainSearch.data.name]: mountainSearch.execute,
   [weatherForecast.data.name]: weatherForecast.execute,
   [mapRoute.data.name]: mapRoute.execute,
   [quizStart.data.name]: quizStart.execute,
-  [quizAnswer.data.name]: quizAnswer.execute,
+  [quizRank.data.name]: quizRank.execute,
   [adminApprove.data.name]: adminApprove.execute,
 };
 
@@ -84,17 +75,18 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once('ready', ready(commandsForRegistration));
 client.on('interactionCreate', interactionCreate(commandMap));
+client.on('guildCreate', guildCreate(commandsForRegistration));
 
 client.login(process.env.DISCORD_TOKEN).catch((err) => {
   log('Failed to login:', err);
 });
 
-// Global error handlers to capture uncaught exceptions / unhandled rejections
+// グローバルエラーハンドラ: キャッチされない例外 / 未処理の Promise 拒否を捕捉します
 process.on('unhandledRejection', (reason) => {
   log('UNHANDLED REJECTION:', reason);
 });
 
 process.on('uncaughtException', (err) => {
   log('UNCAUGHT EXCEPTION:', err);
-  // optionally exit process after logging
+  // 必要であればログ記録後にプロセスを終了することも可能です
 });

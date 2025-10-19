@@ -15,7 +15,7 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
     if (elevationStr) {
       const n = Number(elevationStr);
       if (Number.isNaN(n)) {
-        await interaction.reply({ content: '標高は数値で入力してください。', ephemeral: true });
+  await interaction.reply({ content: '標高は数値で入力してください。', flags: (await import('../../utils/flags')).EPHEMERAL });
         return;
       }
       elevation = n;
@@ -33,8 +33,23 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
 
     // Final sanity checks: require at least a name; elevation optional but must be in allowed range if present
     if (!normalized.name) {
-      await interaction.reply({ content: '名前が必要です。', ephemeral: true });
+  await interaction.reply({ content: '名前が必要です。', flags: (await import('../../utils/flags')).EPHEMERAL });
       return;
+    }
+
+    // Name must include Kanji, Katakana and Hiragana characters
+    // 漢字: \p{Script=Han}, カタカナ: \p{Script=Katakana}, ひらがな: \p{Script=Hiragana}
+    try {
+      const n = String(rawName || '').trim();
+      const hasKanji = /\p{Script=Han}/u.test(n);
+      const hasKatakana = /\p{Script=Katakana}/u.test(n);
+      const hasHiragana = /\p{Script=Hiragana}/u.test(n);
+      if (!(hasKanji && hasKatakana && hasHiragana)) {
+  await interaction.reply({ content: '山名は漢字・カタカナ・ひらがなのすべてを含めて入力してください（例: 富士ふじフジ）。', flags: (await import('../../utils/flags')).EPHEMERAL });
+        return;
+      }
+    } catch (e) {
+      // If regex with Unicode properties isn't supported for some reason, skip this strict check
     }
 
     const payload: any = {
@@ -56,10 +71,10 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
       const { data, error } = await supabase.from('user_mountains').insert([payload]).select().single();
       if (error) {
         log('supabase insert error:', error);
-        await interaction.reply({ content: '登録に失敗しました。', ephemeral: true });
+    await interaction.reply({ content: '登録に失敗しました。', flags: (await import('../../utils/flags')).EPHEMERAL });
         return;
       }
-      await interaction.reply({ content: `山「${data.name}」を登録しました（管理者承認待ち）。`, ephemeral: true });
+  await interaction.reply({ content: `山「${data.name}」を登録しました（管理者承認待ち）。`, flags: (await import('../../utils/flags')).EPHEMERAL });
       return;
     }
 
@@ -77,9 +92,9 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
       },
     });
 
-    await interaction.reply({ content: `山「${created.name}」を登録しました（管理者承認待ち）。`, ephemeral: true });
+  await interaction.reply({ content: `山「${created.name}」を登録しました（管理者承認待ち）。`, flags: (await import('../../utils/flags')).EPHEMERAL });
   } catch (err) {
     log('addModal error:', err);
-    try { await interaction.reply({ content: '登録に失敗しました。', ephemeral: true }); } catch (_) {}
+  try { await interaction.reply({ content: '登録に失敗しました。', flags: (await import('../../utils/flags')).EPHEMERAL }); } catch (_) {}
   }
 }

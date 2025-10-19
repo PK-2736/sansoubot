@@ -8,7 +8,7 @@ const CACHE_FILE = path.join(CACHE_DIR, 'wiki-images.json');
 type CacheEntry = { url: string | null; ts: number };
 type Cache = Record<string, CacheEntry>;
 
-// TTL in hours (default 720 = 30 days)
+// TTL（時間単位、デフォルト 720 = 30 日）
 const TTL_HOURS = Number(process.env.WIKI_CACHE_TTL_HOURS ?? '720');
 const TTL_MS = Math.max(0, TTL_HOURS) * 60 * 60 * 1000;
 
@@ -94,8 +94,8 @@ function ensureHttps(url: string): string {
 }
 
 /**
- * 指定した山名から候補を作り、Wikipedia の代表画像を取得する。
- * キャッシュをファイルに保存して次回以降の呼び出しで API を減らす。
+ * 指定した山名から候補を作成し、Wikipedia の代表画像を取得します。
+ * 取得結果はファイルにキャッシュされ、次回以降の API 呼び出しを削減します。
  */
 export default async function fetchWikipediaImage(pageName: string, nameKana?: string): Promise<string | undefined> {
   if (!pageName) return undefined;
@@ -131,8 +131,8 @@ export default async function fetchWikipediaImage(pageName: string, nameKana?: s
 }
 
 /**
- * 指定したページ名の Wikipedia サマリー（抜粋）を取得する。
- * 返却は { title, extract, description, originalimage } の形。見つからなければ undefined。
+ * 指定したページ名の Wikipedia サマリー（抜粋）を取得します。
+ * 返却値の形は { title, extract, description, originalimage } です。見つからない場合は undefined を返します。
  */
 export async function fetchWikipediaSummary(titleRaw: string): Promise<any | undefined> {
   try {

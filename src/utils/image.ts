@@ -2,8 +2,8 @@ import axios from 'axios';
 import { AttachmentBuilder } from 'discord.js';
 
 /**
- * Fetches an image URL and returns { attachment, filename } if content-type is image/*.
- * Returns undefined on any failure or if content is not an image.
+ * 画像 URL を取得し、Content-Type が image/* の場合に { attachment, filename } を返します。
+ * 失敗した場合や画像でないコンテンツの場合は undefined を返します。
  */
 export default async function fetchImageAttachment(url: string): Promise<{ attachment: AttachmentBuilder; filename: string } | undefined> {
   try {

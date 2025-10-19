@@ -1,6 +1,7 @@
 import axios from 'axios';
 import prefecturesData from './prefectures.json';
 import { supabase } from '../../utils/db';
+import { normalizeForSearch, generateSearchVariants } from '../string';
 
 export const BASE = process.env.MOUNTIX_API_BASE || 'https://mountix.codemountains.org/api/v1';
 const API_KEY = process.env.MOUNTIX_API_KEY || '';
@@ -76,6 +77,35 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
     const res = await axios.get(`${BASE}/mountains`, { params: params as any, headers, timeout: 8000 });
     const arr = Array.isArray(res.data) ? res.data : (res.data?.mountains ?? []);
     const results = arr.map(normalizeMountain);
+
+    // If caller provided a name, apply an additional client-side normalization filter
+    // to increase hit-rate across kanji/kana variants regardless of upstream behavior.
+    if (params.name) {
+      try {
+        const q = normalizeForSearch(params.name);
+        const qvars = generateSearchVariants(q);
+  const filtered = results.filter((m: Mountain) => {
+          const n1 = normalizeForSearch(m.name ?? '');
+          const n2 = normalizeForSearch(m.nameKana ?? '');
+          const variants = new Set<string>([n1, n2, n1.replace(/\s+/g,''), n2.replace(/\s+/g,'')]);
+          // also add kana<->hira variants of the stored names
+          generateSearchVariants(n1).forEach(v => variants.add(v));
+          generateSearchVariants(n2).forEach(v => variants.add(v));
+          // check if any query variant is substring of any stored variant
+          for (const qv of qvars) {
+            for (const sv of variants) {
+              if (!sv) continue;
+              if (sv.includes(qv) || qv.includes(sv)) return true;
+            }
+          }
+          return false;
+        });
+        return filtered;
+      } catch (e) {
+        // if normalization fails, fall back to raw results
+        return results;
+      }
+    }
 
     // Supabase から承認済みのユーザー追加山を検索して結合
     try {
