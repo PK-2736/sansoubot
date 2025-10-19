@@ -1,21 +1,10 @@
-# Welcome to GitHub Desktop!
-
-This is your README. READMEs are where you can communicate what your project is and how to use it.
-
-Write your name on line 6, save it, and then head back to GitHub Desktop.
-
-完璧です！🎉
-では、あなたが構想している「登山情報・天気・地図・クイズ統合Discord Bot」を
-TypeScript + discord.js + Supabase 構成で実装する場合の
-**開発ロードマップ＆フォルダ構成＋使用ライブラリ一覧** をまとめます👇
-
 ---
 
 # 🏔 Discord 登山Bot 開発ドキュメント（原型）
 
 ## 🌲 プロジェクト概要
 
-**登山愛好家向け Discord Bot**
+**Discord山荘 Bot**
 山の情報・天気・ルート・クイズを通して、サーバーメンバー同士の交流を活発にするためのBot。
 
 ---
@@ -133,32 +122,49 @@ mountain-bot/
 
    ```bash
    npm init -y
-   npm install discord.js axios dotenv supabase-js node-cron
-   npm install -D typescript ts-node prisma
+   npm install discord.js axios dotenv @supabase/supabase-js @prisma/client node-cron
+   npm install -D typescript ts-node prisma @types/node
+   npx tsc --init
    npx prisma init
    ```
 
 2. **Discord Botトークン設定**
 
-   * `.env` に以下を追加：
+   * `.env.example` を `.env` にコピーして以下を設定：
 
      ```
-     DISCORD_TOKEN=xxxx
-     SUPABASE_URL=xxxx
-     SUPABASE_KEY=xxxx
+     DISCORD_TOKEN=your_actual_discord_bot_token
+     SUPABASE_URL=your_supabase_project_url
+     SUPABASE_KEY=your_supabase_anon_key
+     DATABASE_URL=postgresql://user:password@host:5432/dbname
      ```
 
-3. **基本コマンド（/ping /help）実装**
+3. **動作確認手順**
 
-4. **Mountix API & JMA API連携**
+   ```bash
+   # 依存関係をインストール
+   npm install
 
-5. **ユーザー投稿山DB構築**
+   # TypeScriptコンパイル確認
+   npm run build
 
-6. **地図生成（Leaflet or StaticMap API）**
+   # 開発モードで起動（ts-node）
+   npm run dev
+   ```
 
-7. **クイズ機能 + ランキング**
+   起動後、Discordサーバーで `/ping` コマンドを実行して「Pong!」が返ってくれば成功です。
 
-8. **Render または Cloudflare Workers にデプロイ**
+4. **基本コマンド（/ping /help）実装** ✅
+
+5. **Mountix API & JMA API連携**
+
+6. **ユーザー投稿山DB構築**
+
+7. **地図生成（Leaflet or StaticMap API）**
+
+8. **クイズ機能 + ランキング**
+
+9. **Render または Cloudflare Workers にデプロイ**
 
 ---
 
@@ -171,6 +177,96 @@ mountain-bot/
 
 ---
 
-必要であれば、
-次はこの構成に沿った **実際のBot起動テンプレート（index.ts + コマンド例）** を書けます。
-続けてそれも出しましょうか？
+## 🛠 OCI (ARM Ubuntu) でのデプロイ手順（要点）
+
+注意（最重要）
+- 既にトークンを公開している状態なので、DISCORD_TOKEN は即時無効化して再発行してください。新しいトークンは .env にのみ保管し、公開リポジトリに置かないでください。
+
+簡易手順（実運用向け）
+1. サーバ準備（ARM Ubuntu）
+   - SSH でログインし、必要パッケージをインストール :
+     ```bash
+     sudo apt update
+     sudo apt install -y build-essential curl git
+     ```
+   - nvm を使って Node.js を入れる（推奨: Node 18+）
+     ```bash
+     curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
+     source ~/.profile
+     nvm install 18
+     node -v
+     ```
+
+2. リポジトリ取得・環境変数設定
+   ```bash
+   git clone <repo-url> ~/mountain-bot
+   cd ~/mountain-bot
+   cp .env.example .env
+   # .env を編集して DISCORD_TOKEN, DATABASE_URL, SUPABASE_* 等を設定
+   ```
+
+3. 依存関係インストール・Prisma 準備
+   ```bash
+   npm ci
+   npx prisma generate
+   # 開発時:
+   npx prisma migrate dev --name init
+   # 本番環境でマイグレーションを適用する場合:
+   npx prisma migrate deploy
+   ```
+
+4. ビルド & 起動（systemd の例）
+   - ビルド :
+     ```bash
+     npm run build
+     ```
+   - systemd サービス（例）: /etc/systemd/system/mountain-bot.service
+     ```ini
+     [Unit]
+     Description=mountain-bot
+     After=network.target
+
+     [Service]
+     Type=simple
+     User=ubuntu
+     WorkingDirectory=/home/ubuntu/mountain-bot
+     Environment=NODE_ENV=production
+     EnvironmentFile=/home/ubuntu/mountain-bot/.env
+     ExecStart=/home/ubuntu/.nvm/versions/node/v18.x/bin/node dist/index.js
+     Restart=always
+     RestartSec=5
+     StandardOutput=syslog
+     StandardError=syslog
+     SyslogIdentifier=mountain-bot
+
+     [Install]
+     WantedBy=multi-user.target
+     ```
+     有効化・起動 :
+     ```bash
+     sudo systemctl daemon-reload
+     sudo systemctl enable --now mountain-bot
+     sudo journalctl -u mountain-bot -f
+     ```
+
+   - 代替: PM2 を使う場合
+     ```bash
+     npm install -g pm2
+     pm2 start dist/index.js --name mountain-bot --env production
+     pm2 save
+     pm2 startup
+     ```
+
+5. Docker（ARM）での運用案（任意）
+   - ベースイメージは multiarch を意識して node:18-bullseye-slim などを使用。
+   - ビルド（サーバ側で直接）:
+     ```bash
+     docker build -t mountain-bot:latest .
+     docker run -d --env-file .env --name mountain-bot --restart unless-stopped mountain-bot:latest
+     ```
+   - ローカルでビルドして ARM にプッシュする場合は `--platform linux/arm64` を指定。
+
+運用メモ（短く）
+- ログは journalctl / PM2 で監視。ログローテートや Sentry 等の監視導入を検討してください。
+- DB接続情報（DATABASE_URL）は必須。Supabase と Prisma を併用する場合は主にどちらをデータソースにするか方針を決めてください。
+- 常時稼働にあたっては自動再起動、メモリ監視、セキュリティ更新（OS パッチ）を定期的に実施してください。
