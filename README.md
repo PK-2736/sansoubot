@@ -1,12 +1,12 @@
 
 ---
 
-# 🏔 Discord 登山Bot 開発ドキュメント（原型）
+# 🏔 Discord山荘Bot 開発ドキュメント
 
 ## 🌲 プロジェクト概要
 
 **Discord山荘 Bot**
-山の情報・天気・ルート・クイズを通して、サーバーメンバー同士の交流を活発にするためのBot。
+山の情報・天気・ルート・クイズを通して、サーバーメンバー同士の交流を活発にするためのBotです。
 
 ---
 
@@ -18,7 +18,7 @@
 | ☁️ 天気情報       | 山域の天気予報・警報取得             | JMA Open Data API          |
 | 🗺 地図／ルート表示   | OSM + GSI から静的地図生成       | Leaflet / Static Map API   |
 | 🧗‍♂️ ユーザー投稿山 | 独自DBで管理・承認制              | Supabase                   |
-| ❓ クイズ機能       | 山の豆知識・写真クイズ              | Supabase（問題管理）             |
+| ❓ クイズ機能       | 山の豆知識クイズ              | Supabase（問題管理）             |
 | 🔔 通知機能       | 天気警報や新しい山追加などを通知         | Discord Webhook / cron-job |
 
 ---
@@ -27,7 +27,7 @@
 
 | 分類          | 技術                                      | 補足                                     |
 | ----------- | --------------------------------------- | -------------------------------------- |
-| 言語          | **TypeScript (Node.js)**                | 開発効率・型安全性が高い                           |
+| 言語          | **TypeScript (Node.js)**                | 開発効率・型安全性ヨシ。                           |
 | Discord SDK | **discord.js v14**                      | 最新の Slash Command / Button / Embed に対応 |
 | API通信       | axios / node-fetch                      | JMA・MountixなどREST連携用                   |
 | DB          | **Supabase (PostgreSQL)**               | ユーザー投稿・クイズ・ランキング管理                     |
@@ -35,7 +35,7 @@
 | 地図          | leaflet + leaflet-image / StaticMap API | GSIやOSMの地図描画                           |
 | スケジューラー     | node-cron                               | 定期天気通知など                               |
 | 環境変数管理      | dotenv                                  | APIキー管理                                |
-| デプロイ        | Render / Railway / Cloudflare Workers   | 無料枠あり・常時稼働可能                           |
+| デプロイ        | OCI VPS A1 ampere   | 常時稼働                          |
 
 ---
 
