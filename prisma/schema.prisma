@@ -26,6 +26,8 @@ model QuizQuestion {
   options   String // JSON文字列として保存（SQLite対応）
   answer    String
   image_url String?
+  source    String   @default("mountix") // 'mountix' or 'gemini'
+  created_at DateTime @default(now())
 }
 
 model QuizScore {

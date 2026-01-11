@@ -15,7 +15,7 @@ export default {
         .setTitle('山クイズ')
         .setDescription(`全${questions.length}問の山クイズを開始できます！\n\n・ボタンでスタート\n・終了後に全問の正答も表示されます`)
         .setColor(0x4caf50)
-        .setFooter({ text: 'Powered by Mountix' });
+        .setFooter({ text: 'Powered by Mountix & Gemini AI' });
       const startButton = new ButtonBuilder().setCustomId('quiz:start').setLabel('開始').setStyle(ButtonStyle.Success);
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(startButton);
       await safeReply(interaction, { embeds: [eb], components: [row] });

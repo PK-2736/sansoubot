@@ -7,12 +7,37 @@
 
 このリポジトリは、Supabase（PostgreSQL）での保存から、軽量な内部保存（Prisma + SQLite）に移行しました。データは `prisma/dev.db` に保存されます。
 
-- セットアップ手順:
-	- 依存関係のインストール: `npm install`
-	- Prisma クライアント生成: `npm run prisma:generate`
-	- スキーマをDBへ反映: `npx prisma db push`
+### セットアップ手順
+
+1. **依存関係のインストール**
+   ```bash
+   npm install
+   ```
+
+2. **環境変数の設定**
+   - `.env.example` をコピーして `.env` を作成
+   ```bash
+   cp .env.example .env
+   ```
+   - `.env` ファイルに必要なAPIキーを設定:
+     - `DISCORD_TOKEN`: Discord Bot Token（[Discord Developer Portal](https://discord.com/developers/applications)）
+     - `GEMINI_API_KEY`: Gemini API Key（[Google AI Studio](https://makersuite.google.com/app/apikey)） ※クイズ生成機能を使う場合のみ
+
+3. **Prismaのセットアップ**
+   ```bash
+   npm run prisma:generate
+   npx prisma db push
+   ```
+
+4. **ビルドと実行**
+   ```bash
+   npm run build
+   npm start
+   ```
 
 クイズのスコアは `QuizScore` テーブル、ユーザー追加の山は `UserMountain` テーブルに保存されます。検索・承認・ランキングはすべて内部DBを使用します。
+
+**⚠️ 注意**: `.env` ファイルには機密情報が含まれるため、Gitにコミットしないでください（.gitignoreに含まれています）。
 
 ## 🌲 プロジェクト概要
 
@@ -25,11 +50,11 @@
 
 | 機能            | 内容                       | 利用サービス/API                 |
 | ------------- | ------------------------ | -------------------------- |
-| 🏔 山情報取得      | Mountix API + ユーザー登録山データ + wiki情報 | Mountix API / Supabase     |
+| 🏔 山情報取得      | Mountix API + ユーザー登録山データ + Wikipedia画像情報 | Mountix API / Wikipedia API / Prisma (SQLite)     |
 | ☁️ 天気情報       | 山域の天気予報・警報取得             | JMA Open Data API          |
 | 🗺 地図／ルート表示   | OSM + GSI から静的地図生成       | Leaflet / Static Map API   |
-| 🧗‍♂️ ユーザー投稿山 | 独自DBで管理・承認制              | Supabase                   |
-| ❓ クイズ機能       | 山の豆知識クイズ              | Supabase（問題管理）             |
+| 🧗‍♂️ ユーザー投稿山 | 独自DBで管理・承認制              | Prisma (SQLite)                   |
+| ❓ クイズ機能       | **AI生成クイズ + Mountix山データクイズ（Mountix 3問 + Gemini AI 7問）**              | Gemini API / Mountix API / Prisma (SQLite)             |
 | 🔔 通知機能       | 天気警報や新しい山追加などを通知         | Discord Webhook / cron-job |
 
 ---
@@ -99,32 +124,45 @@ mountain-bot/
 
 ---
 
-## 🧮 Supabase（DB）スキーマ例
+## 🧮 Prisma（DB）スキーマ
 
-### 🏔 user_mountains
+### 🏔 UserMountain
 
 | カラム名        | 型         | 説明            |
 | ----------- | --------- | ------------- |
-| id          | uuid      | 主キー           |
-| name        | text      | 山名            |
-| elevation   | int       | 標高            |
-| location    | text      | 所在地           |
-| description | text      | 概要            |
-| route       | text      | 登山ルート         |
-| photo_url   | text      | 写真URL         |
-| added_by    | text      | DiscordユーザーID |
-| approved    | boolean   | 承認済みか         |
-| created_at  | timestamp | 登録日時          |
+| id          | String (UUID)      | 主キー           |
+| name        | String      | 山名            |
+| elevation   | Int       | 標高            |
+| location    | String      | 所在地           |
+| description | String?      | 概要（任意）            |
+| route       | String?      | 登山ルート（任意）         |
+| photo_url   | String?      | 写真URL（任意）         |
+| added_by    | String      | DiscordユーザーID |
+| approved    | Boolean   | 承認済みか（デフォルト: false）         |
+| created_at  | DateTime | 登録日時（自動設定）          |
 
-### 🧠 quiz_questions
+### 🧠 QuizQuestion
 
 | カラム       | 型    | 内容        |
 | --------- | ---- | --------- |
-| id        | uuid | 主キー       |
-| question  | text | 問題文       |
-| options   | json | 選択肢       |
-| answer    | text | 正解        |
-| image_url | text | （任意）写真URL |
+| id        | String (UUID) | 主キー       |
+| question  | String | 問題文       |
+| options   | String (JSON) | 選択肢       |
+| answer    | String | 正解        |
+| image_url | String? | （任意）写真URL |
+| source | String | クイズソース（mountix / gemini）デフォルト: mountix |
+| created_at | DateTime | 作成日時（自動設定） |
+
+### 📊 QuizScore
+
+| カラム       | 型    | 内容        |
+| --------- | ---- | --------- |
+| id        | String (UUID) | 主キー       |
+| user_id  | String | DiscordユーザーID       |
+| username   | String | Discordユーザー名       |
+| score    | Int | スコア        |
+| time_ms | Int | 完了時間（ミリ秒） |
+| created_at | DateTime | 記録日時（自動設定） |
 
 ---
 ---
@@ -132,6 +170,36 @@ mountain-bot/
 ## 🌐 将来的な拡張案
 
 * 山行記録（ヤマレコAPIとの連携）
-* AIによる山写真の自動認識クイズ
+* より高度なAIクイズ生成（画像認識を含む）
+* ユーザー別クイズ難易度調整
+
+---
+
+## 🤖 Gemini AI クイズ生成について
+
+このBotは、登山クイズの生成にGoogle Gemini APIを活用しています：
+
+- **混合クイズ構成**: Mountix API（山データ）から3問 + Gemini AI生成7問 = 計10問
+- **クイズの保存**: Gemini生成クイズはDBに保存され、再利用されます（API呼び出し削減）
+- **重複防止**: 同じ問題文のクイズは自動的にスキップされます
+- **モデル**: `gemini-2.5-flash`（無料枠で1日1500リクエストまで利用可能）
+
+### Gemini API Keyの取得と設定
+
+1. **API Keyの取得**
+   - [Google AI Studio](https://makersuite.google.com/app/apikey) にアクセス
+   - Googleアカウントでログイン
+   - 「Create API Key」をクリックしてAPIキーを生成
+
+2. **環境変数に設定**
+   ```bash
+   # .envファイルに以下を追加
+   GEMINI_API_KEY=your_generated_api_key_here
+   ```
+
+3. **注意事項**
+   - APIキーは`.env`ファイルに保存し、**絶対にGitにコミットしないでください**
+   - 無料枠: 1日1500リクエスト、1分15リクエスト
+   - クイズはDBに保存されるため、同じ問題は再生成されません（効率的）
 
 ---
