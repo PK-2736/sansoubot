@@ -31,6 +31,7 @@ export async function generateGeminiQuizQuestions(count: number = 7): Promise<Ge
 - 登山の安全、装備選択、気象判断、高山病対策、ルートファインディング、遭難対策など実践的な知識
 - 問題文は30文字以内、選択肢は15文字以内の簡潔な文にする
 - 各問題は4つの選択肢を持つ
+- **重要**: 4つの選択肢はすべて異なる内容にすること（重複禁止）
 - 正解は選択肢の中の1つ
 - 中級者から上級者向けの実用的で難易度の高い内容
 - 実際の登山で役立つ知識を重視
@@ -80,9 +81,20 @@ export async function generateGeminiQuizQuestions(count: number = 7): Promise<Ge
     }
 
     const questions: GeminiQuizQuestion[] = JSON.parse(jsonText);
-    log(`[GeminiQuiz] Successfully generated ${questions.length} questions`);
+    
+    // 選択肢の重複チェック：重複がある問題は除外
+    const validQuestions = questions.filter((q, idx) => {
+      const uniqueOptions = new Set(q.options);
+      if (uniqueOptions.size !== q.options.length) {
+        log(`[GeminiQuiz] Skipping question ${idx + 1} due to duplicate options: ${q.question}`);
+        return false;
+      }
+      return true;
+    });
+    
+    log(`[GeminiQuiz] Successfully generated ${validQuestions.length}/${questions.length} valid questions`);
 
-    return questions;
+    return validQuestions;
   } catch (error: any) {
     log('[GeminiQuiz] Error generating questions:', error?.message ?? error);
     return [];

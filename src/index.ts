@@ -33,7 +33,7 @@ const commandsForRegistration = [
   // limit オプションは削除されました
     ],
   },
-  // weather_forecast は未完成のため非表示
+  // weather_forecast と map_route は未完成のため非表示
   // {
   //   name: weatherForecast.data.name,
   //   description: '山域の天気予報を表示',
@@ -43,17 +43,17 @@ const commandsForRegistration = [
   // { name: 'mountain', description: '山名または Mountix ID（例: 富士山, 1234）', type: ApplicationCommandOptionType.String, required: false },
   //   ],
   // },
-  {
-    name: mapRoute.data.name,
-    description: 'Static Mapなどでルート画像を生成',
-    options: [
-      { name: 'markers', description: '複数地点（;区切り）例: "lat,lon;lat2,lon2"', type: ApplicationCommandOptionType.String, required: false },
-      { name: 'path', description: 'ルート座標（;区切り）例: "lat,lon;lat2,lon2"', type: ApplicationCommandOptionType.String, required: false },
-      { name: 'zoom', description: 'ズームレベル（数値）', type: ApplicationCommandOptionType.String, required: false },
-      { name: 'size', description: '画像サイズ（例: 800x600）', type: ApplicationCommandOptionType.String, required: false },
-      { name: 'gpx', description: 'GPXファイルを添付（ファイル）', type: ApplicationCommandOptionType.Attachment, required: false },
-    ],
-  },
+  // {
+  //   name: mapRoute.data.name,
+  //   description: 'Static Mapなどでルート画像を生成',
+  //   options: [
+  //     { name: 'markers', description: '複数地点（;区切り）例: "lat,lon;lat2,lon2"', type: ApplicationCommandOptionType.String, required: false },
+  //     { name: 'path', description: 'ルート座標（;区切り）例: "lat,lon;lat2,lon2"', type: ApplicationCommandOptionType.String, required: false },
+  //     { name: 'zoom', description: 'ズームレベル（数値）', type: ApplicationCommandOptionType.String, required: false },
+  //     { name: 'size', description: '画像サイズ（例: 800x600）', type: ApplicationCommandOptionType.String, required: false },
+  //     { name: 'gpx', description: 'GPXファイルを添付（ファイル）', type: ApplicationCommandOptionType.Attachment, required: false },
+  //   ],
+  // },
   { name: quizStart.data.name, description: '山クイズを開始' },
   { name: quizRank.data.name, description: 'クイズのランキングを表示' },
   { name: adminApprove.data.name, description: 'ユーザー投稿山の承認（管理者用）' },
