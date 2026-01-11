@@ -44,6 +44,25 @@ export default function createInteractionHandler(commands: CommandMap) {
               }
             }
 
+            // ボタンを無効化してメッセージを更新
+            try {
+              const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = await import('discord.js');
+              const disabledApprove = new ButtonBuilder()
+                .setCustomId(`mountain_approve_${mountainId}`)
+                .setLabel('承認済み')
+                .setStyle(ButtonStyle.Success)
+                .setDisabled(true);
+              const disabledReject = new ButtonBuilder()
+                .setCustomId(`mountain_reject_${mountainId}`)
+                .setLabel('却下')
+                .setStyle(ButtonStyle.Danger)
+                .setDisabled(true);
+              const disabledRow = new ActionRowBuilder().addComponents(disabledApprove, disabledReject).toJSON();
+              await interaction.message.edit({ components: [disabledRow] });
+            } catch (editErr: any) {
+              log('[MountainApprove] Failed to disable buttons:', editErr?.message);
+            }
+
             await interaction.reply({ content: `✅ 山「${mountain.name}」を承認しました。投稿者にDMを送信しました。`, flags: (await import('../utils/flags')).EPHEMERAL });
           } catch (err: any) {
             log('[MountainApprove] Error:', err?.message);
@@ -316,6 +335,23 @@ export default function createInteractionHandler(commands: CommandMap) {
               } catch (dmErr: any) {
                 log('[MountainReject] Failed to send DM:', dmErr?.message);
               }
+            }
+
+            // 元のメッセージを削除
+            try {
+              const notificationChannelId = '1459847925092978709';
+              const channel = await interaction.client.channels.fetch(notificationChannelId).catch(() => null);
+              if (channel && channel.isTextBased()) {
+                const messages = await (channel as any).messages.fetch({ limit: 100 });
+                const targetMsg = messages.find((msg: any) => 
+                  msg.embeds?.[0]?.fields?.some((f: any) => f.name === '投稿ID' && f.value === mountainId)
+                );
+                if (targetMsg) {
+                  await targetMsg.delete();
+                }
+              }
+            } catch (deleteErr: any) {
+              log('[MountainReject] Failed to delete notification message:', deleteErr?.message);
             }
 
             await modal.reply({ content: `✅ 山「${mountain.name}」を却下しました。投稿者にDMを送信しました。`, flags: (await import('../utils/flags')).EPHEMERAL });

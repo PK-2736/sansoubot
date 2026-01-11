@@ -98,7 +98,7 @@ export default {
           `名前: ${norm.name}`,
           `標高: ${norm.elevation ?? '不明'} m`,
           `場所: ${m.prefectures && m.prefectures.length ? m.prefectures.join(', ') : (m.gsiUrl ?? '不明')}`,
-          norm.description ? `\n${norm.description}` : '',
+          norm.description ? `\n📝 説明:\n${norm.description}` : '',
           `\nソース: ${source}`,
           addedByName ? `追加者: ${addedByName}` : (addedBy ? `追加者: ${addedBy}` : ''),
         ];
