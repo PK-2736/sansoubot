@@ -1,6 +1,6 @@
 import { ChatInputCommandInteraction } from 'discord.js';
 import { getMountain, BASE as MOUNTIX_BASE } from '../../utils/api/mountix';
-import { supabase } from '../../utils/db';
+import { prisma } from '../../utils/db';
 import { formatEmbed } from '../../utils/format';
 import { generateStaticMap } from '../../utils/api/map';
 import fetchWikipediaImage from '../../utils/api/wiki';
@@ -37,33 +37,30 @@ export default {
         m = null;
       }
 
-  // 2) 見つからない場合は Supabase の user_mountains を id または名前で検索します
+  // 2) 見つからない場合は内部DBの user_mountains を id または名前で検索します
   let addedBy: string | undefined = undefined;
   let addedByName: string | undefined = undefined;
       if (!m) {
-        if (supabase) {
-          // if id looks like user-<uuid> (used in search merge), strip prefix
-          const q = String(id).replace(/^user-/, '');
-          const { data } = await supabase.from('user_mountains').select('*').or(`id.eq.${q},name.ilike.%${q}%`).limit(1);
-          if (data && data.length) {
-            const d = data[0] as any;
-            m = { id: `user-${d.id}`, name: d.name, elevation: d.elevation, description: d.description, photo_url: d.photo_url, prefectures: [], coords: undefined };
-            source = 'Supabase';
-            // Supabase は Discord のスノーフレークを 'added_by' または 'discord_id' のいずれかに格納している可能性があります
-            addedBy = d.discord_id ?? d.added_by ?? undefined;
-            // Discord ユーザー名を取得
-            if (addedBy && interaction.client && typeof interaction.client.users?.fetch === 'function') {
-              try {
-                const user = await interaction.client.users.fetch(addedBy);
-                if (user) addedByName = `${user.username}#${user.discriminator}`;
-              } catch (_) {
-                // 取得失敗時はメンションでフォールバック
-                addedByName = `<@${addedBy}>`;
-              }
+        // if id looks like user-<uuid> (used in search merge), strip prefix
+        const q = String(id).replace(/^user-/, '');
+        const byId = await prisma.userMountain.findUnique({ where: { id: q } }).catch(() => null);
+        const byName = byId ? null : await prisma.userMountain.findFirst({ where: { name: { contains: q } } }).catch(() => null);
+        const d: any = byId ?? byName;
+        if (d) {
+          m = { id: `user-${d.id}`, name: d.name, elevation: d.elevation ?? undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, prefectures: [], coords: undefined };
+          source = 'Local';
+          addedBy = d.added_by ?? undefined;
+          // Discord ユーザー名を取得
+          if (addedBy && interaction.client && typeof interaction.client.users?.fetch === 'function') {
+            try {
+              const user = await interaction.client.users.fetch(addedBy);
+              if (user) addedByName = `${user.username}#${user.discriminator}`;
+            } catch (_) {
+              // 取得失敗時はメンションでフォールバック
+              addedByName = `<@${addedBy}>`;
             }
-            // 最終フォールバック: 名前が取得できない場合は ID をメンションとして表示します
-            if (!addedByName && addedBy) addedByName = `<@${addedBy}>`;
           }
+          if (!addedByName && addedBy) addedByName = `<@${addedBy}>`;
         }
       }
 
@@ -91,23 +88,25 @@ export default {
         addedByName ? `追加者: ${addedByName}` : (addedBy ? `追加者: ${addedBy}` : ''),
       ];
 
-  // 出典リンク: Mountix / Supabase / Wikipedia
+  // 出典リンク: Mountix / Local / Wikipedia
       const sourceLinks: string[] = [];
       if (source === 'Mountix' && m.id) {
         sourceLinks.push(`<${MOUNTIX_BASE}/mountains/${encodeURIComponent(String(m.id))}>`);
       }
-      if (source === 'Supabase' && m.id) {
-        // m.id for user records is prefixed 'user-<id>' in our code; show the record id
+      if (source === 'Local' && m.id) {
         const rid = String(m.id).replace(/^user-/, '');
-        sourceLinks.push(`Supabase record ID: ${rid}`);
+        sourceLinks.push(`Local record ID: ${rid}`);
       }
 
       const embeds = [formatEmbed(norm.name, lines.join('\n')) as any];
-  // 画像の優先順: Mountix / Supabase の photo_url -> Wikipedia の代表画像 -> Static Map
+      // 画像の優先順: Local の photo_url -> Wikipedia の代表画像 -> Static Map
       let imageUrl: string | undefined = m.photo_url ?? undefined;
       let wikiPageUrl: string | undefined;
+      log(`mountain_info: imageUrl initial=${imageUrl}`);
       if (!imageUrl && m.name) {
+        log(`mountain_info: fetching wiki image for "${m.name}"`);
         const wikiImage = await fetchWikipediaImage(m.name, (m as any).nameKana ?? undefined);
+        log(`mountain_info: wikiImage result=${wikiImage?.substring(0, 50) ?? 'undefined'}`);
         if (wikiImage) imageUrl = wikiImage;
       }
   // サマリーを取得して正規の URL を抽出し、出典リンクに追加します

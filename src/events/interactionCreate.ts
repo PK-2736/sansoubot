@@ -2,7 +2,7 @@ import { Interaction, ChatInputCommandInteraction, ModalSubmitInteraction } from
 import { log } from '../utils/logger';
 import { loadLatestQuiz } from '../utils/quiz';
 import quizState from '../utils/quizState';
-import { supabase } from '../utils/db';
+import { prisma } from '../utils/db';
 
 type CommandExecute = (interaction: ChatInputCommandInteraction) => Promise<any>;
 type CommandMap = Record<string, CommandExecute>;
@@ -56,49 +56,38 @@ export default function createInteractionHandler(commands: CommandMap) {
             if (s.current >= s.questions.length) {
               const totalTime = s.times.reduce((a, b) => a + b, 0);
               const score = s.correct * 1000 - Math.round(totalTime / 1000);
-                // save to supabase and update best score per user
+                // 内部保存 (Prisma/SQLite) でユーザーのベストスコアを更新
                 let bestUpdated = false;
-                if (supabase) {
-                  try {
-                    // 1) try to find existing by user_id
-                    const { data: existing, error: fetchErr } = await supabase.from('quiz_scores').select('id,score').eq('user_id', s.userId).maybeSingle();
-                    if (fetchErr) log('supabase fetch error (by user_id):', fetchErr);
-                    let found = existing as any | null;
+                try {
+                  // 1) user_id で既存レコードを検索
+                  let found = await prisma.quizScore.findUnique({ where: { user_id: s.userId } }).catch(() => null);
 
-                    // 2) fallback: match by username where user_id is null (anonymous)
-                    if (!found) {
-                      const { data: anon, error: anonErr } = await supabase.from('quiz_scores').select('id,score').eq('username', interaction.user.username).is('user_id', null).maybeSingle();
-                      if (anonErr) log('supabase fetch error (by username):', anonErr);
-                      if (anon) {
-                        // link the anonymous row to this user
-                        const { error: linkErr } = await supabase.from('quiz_scores').update({ user_id: s.userId }).eq('id', (anon as any).id);
-                        if (linkErr) {
-                          log('failed to link anonymous quiz_score to user_id:', linkErr);
-                        } else {
-                          found = { id: (anon as any).id, score: (anon as any).score } as any;
-                        }
+                  // 2) 見つからない場合は、匿名（user_id が null）の同名ユーザーを検索してリンク
+                  if (!found) {
+                    const anon = await prisma.quizScore.findFirst({ where: { username: interaction.user.username, user_id: null } }).catch(() => null);
+                    if (anon) {
+                      try {
+                        await prisma.quizScore.update({ where: { id: anon.id }, data: { user_id: s.userId } });
+                        found = { ...anon, user_id: s.userId } as any;
+                      } catch (linkErr: any) {
+                        log('failed to link anonymous quiz_score to user_id:', linkErr);
                       }
                     }
-
-                    // 3) If still not found, insert new
-                    if (!found) {
-                      const { error: insertErr } = await supabase.from('quiz_scores').insert([{ user_id: s.userId, username: interaction.user.username, score, time_ms: totalTime }]);
-                      if (insertErr) {
-                        log('supabase insert error (quiz_scores):', insertErr);
-                      } else {
-                        bestUpdated = true;
-                      }
-                    } else {
-                      const prevScore = (found as any).score as number || 0;
-                      if (score > prevScore) {
-                        const { error: updateErr } = await supabase.from('quiz_scores').update({ score, time_ms: totalTime, username: interaction.user.username }).eq('id', (found as any).id);
-                        if (updateErr) log('supabase update error (quiz_scores):', updateErr);
-                        else bestUpdated = true;
-                      }
-                    }
-                  } catch (e) {
-                    log('failed to save quiz score', e);
                   }
+
+                  // 3) まだなければ新規作成、あればベスト更新
+                  if (!found) {
+                    await prisma.quizScore.create({ data: { user_id: s.userId, username: interaction.user.username, score, time_ms: totalTime } });
+                    bestUpdated = true;
+                  } else {
+                    const prevScore = (found.score ?? 0) as number;
+                    if (score > prevScore) {
+                      await prisma.quizScore.update({ where: { id: found.id }, data: { score, time_ms: totalTime, username: interaction.user.username } });
+                      bestUpdated = true;
+                    }
+                  }
+                } catch (e) {
+                  log('failed to save quiz score', e);
                 }
               const { EmbedBuilder } = await import('discord.js');
                 // 全問の正答を列挙

@@ -1,5 +1,4 @@
 import { ChatInputCommandInteraction, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } from 'discord.js';
-import { prisma, supabase } from '../../utils/db';
 import { log } from '../../utils/logger';
 
 export default {

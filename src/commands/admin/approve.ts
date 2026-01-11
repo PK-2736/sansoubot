@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ComponentType } from 'discord.js';
-import { supabase, prisma } from '../../utils/db';
+import { prisma } from '../../utils/db';
 import { log } from '../../utils/logger';
 import { formatEmbed } from '../../utils/format';
 
@@ -18,16 +18,8 @@ export default {
     await interaction.deferReply({ ephemeral: true });
 
     try {
-      // fetch pending user_mountains
-      let pending: any[] = [];
-      if (supabase) {
-        const { data, error } = await supabase.from('user_mountains').select('*').eq('approved', false).order('created_at', { ascending: false }).limit(10);
-        if (error) throw error;
-        pending = data ?? [];
-      } else {
-        // fallback to prisma
-        pending = await prisma.userMountain.findMany({ where: { approved: false }, orderBy: { created_at: 'desc' }, take: 10 });
-      }
+      // 承認待ちの山情報を内部DBから取得
+      const pending = await prisma.userMountain.findMany({ where: { approved: false }, orderBy: { created_at: 'desc' }, take: 10 });
 
       if (!pending || pending.length === 0) {
         await interaction.editReply({ content: '承認待ちの山情報はありません。' });
@@ -42,13 +34,13 @@ export default {
       const buildMessage = async () => {
         const embeds = pending.map((item, idx) => {
           let addedByText = item.added_by ?? '不明';
-          if (item.discord_id) {
+          if (item.added_by) {
             try {
-              const user = interaction.client.users.cache.get(String(item.discord_id));
+              const user = interaction.client.users.cache.get(String(item.added_by));
               if (user) addedByText = `${user.username}#${user.discriminator}`;
-              else addedByText = `<@${String(item.discord_id)}>`;
+              else addedByText = `<@${String(item.added_by)}>`;
             } catch (_) {
-              addedByText = `<@${String(item.discord_id)}>`;
+              addedByText = `<@${String(item.added_by)}>`;
             }
           }
           return formatEmbed(
@@ -90,11 +82,7 @@ export default {
           } else if (btn.customId === 'approve_selected') {
             const toApprove = pending.filter(item => selected[item.id]);
             for (const item of toApprove) {
-              if (supabase) {
-                await supabase.from('user_mountains').update({ approved: true }).eq('id', item.id);
-              } else {
-                await prisma.userMountain.update({ where: { id: item.id }, data: { approved: true } });
-              }
+              await prisma.userMountain.update({ where: { id: item.id }, data: { approved: true } });
             }
             await interaction.editReply({ content: `承認しました: ${toApprove.map(i => i.name).join(', ')}`, embeds: [], components: [] });
             collector.stop('done');

@@ -3,7 +3,7 @@ import { searchMountains, BASE as MOUNTIX_BASE, getMountain } from '../../utils/
 import { formatEmbed } from '../../utils/format';
 import { log } from '../../utils/logger';
 import fetchWikipediaImage, { fetchWikipediaSummary } from '../../utils/api/wiki';
-import { supabase } from '../../utils/db';
+import { prisma } from '../../utils/db';
 import safeReply from '../../utils/discord';
 import { AttachmentBuilder } from 'discord.js';
 import { normalizeMountainData } from '../../utils/normalize';
@@ -56,15 +56,16 @@ export default {
 
         let addedBy: string | undefined = undefined;
         let addedByName: string | undefined = undefined;
-  // 2) 次に Supabase の user_mountains を確認します
-        if (!m && supabase) {
+  // 2) 次に内部DBの user_mountains を確認します
+        if (!m) {
           const qid = String(id).replace(/^user-/, '');
-          const { data } = await supabase.from('user_mountains').select('*').or(`id.eq.${qid},name.ilike.%${qid}%`).limit(1);
-          if (data && data.length) {
-            const d = data[0] as any;
-            m = { id: `user-${d.id}`, name: d.name, elevation: d.elevation, description: d.description, photo_url: d.photo_url, prefectures: [], coords: undefined };
-            source = 'Supabase';
-            addedBy = d.discord_id ?? d.added_by ?? undefined;
+          const byId = await prisma.userMountain.findUnique({ where: { id: qid } }).catch(() => null);
+          const byName = byId ? null : await prisma.userMountain.findFirst({ where: { name: { contains: qid } } }).catch(() => null);
+          const d: any = byId ?? byName;
+          if (d) {
+            m = { id: `user-${d.id}`, name: d.name, elevation: d.elevation ?? undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, prefectures: [], coords: undefined };
+            source = 'Local';
+            addedBy = d.added_by ?? undefined;
             if (addedBy && interaction.client && typeof interaction.client.users?.fetch === 'function') {
               try {
                 const user = await interaction.client.users.fetch(addedBy);
@@ -106,9 +107,9 @@ export default {
         if (source === 'Mountix' && m.id) {
           sourceLinks.push(`<${MOUNTIX_BASE}/mountains/${encodeURIComponent(String(m.id))}>`);
         }
-        if (source === 'Supabase' && m.id) {
+        if (source === 'Local' && m.id) {
           const rid = String(m.id).replace(/^user-/, '');
-          sourceLinks.push(`Supabase record ID: ${rid}`);
+          sourceLinks.push(`Local record ID: ${rid}`);
         }
 
         const embeds = [formatEmbed(norm.name, lines.join('\n')) as any];
@@ -174,74 +175,85 @@ export default {
       const perPage = 1; // 1件ずつ大きな画像で見せる
       const pages = Math.max(1, Math.ceil(rows.length / perPage));
 
-  // すべての行についてサムネイルや出典リンクを事前解決（外部 API への負荷を避けるため逐次処理）
+  // すべての行についてサムネイルや出典リンクを事前解決（並列処理で高速化）
   const thumbs: (string | undefined)[] = [];
   const sources: string[] = []; // 出典ラベル用テキスト
   const sourceLinks: (string | undefined)[] = []; // URL または ID 文字列
   const addedBys: (string | undefined)[] = [];
-  for (const r of rows) {
-        // thumbnail
-        if (r.photo_url) thumbs.push(r.photo_url);
-        else {
-          const wikiImg = await fetchWikipediaImage(r.name, (r as any).nameKana ?? undefined);
-          thumbs.push(wikiImg ?? undefined);
-        }
+  
+  // 画像取得を並列で実行
+  const wikiImages = await Promise.allSettled(
+    rows.map(r => {
+      if (r.photo_url) return Promise.resolve(r.photo_url);
+      return fetchWikipediaImage(r.name, (r as any).nameKana ?? undefined);
+    })
+  );
+  
+  log('mountain_search: wikiImages results count:', wikiImages.length);
+  for (let idx = 0; idx < wikiImages.length; idx++) {
+    const result = wikiImages[idx];
+    if (result.status === 'fulfilled') {
+      log(`mountain_search: [${idx}] ${rows[idx]?.name} -> ${result.value?.substring(0, 50) ?? 'undefined'}`);
+    } else {
+      log(`mountain_search: [${idx}] ${rows[idx]?.name} -> REJECTED`);
+    }
+  }
+  
+  for (let idx = 0; idx < rows.length; idx++) {
+    const r = rows[idx];
+    // thumbnail from parallel result
+    const imgResult = wikiImages[idx];
+    if (imgResult.status === 'fulfilled' && imgResult.value) {
+      thumbs.push(imgResult.value);
+    } else {
+      thumbs.push(undefined);
+    }
 
-  // 出典を判定: Supabase の user レコードは id に 'user-' プレフィックスを付与しています
-        const rid = String(r.id ?? '');
-        if (rid.startsWith('user-')) {
-          sources.push('Supabase');
-          const uid = rid.replace(/^user-/, '');
-          // store record id text; we'll try to fetch added_by if supabase client is available
-          sourceLinks.push(`Supabase record: \`${uid}\``);
-          if (supabase) {
-            try {
-              const { data } = await supabase.from('user_mountains').select('added_by,discord_id').eq('id', uid).maybeSingle();
-              const row = data as any;
-              let display: string | undefined = undefined;
-              if (row) {
-                if (row.discord_id) {
-                  // try to fetch Discord username
-                          try {
-                            const user = await interaction.client.users.fetch(String(row.discord_id));
-                            display = `${user.username}#${user.discriminator}`;
-                          } catch (_) {
-                            display = `<@${String(row.discord_id)}>`;
-                          }
-                } else if (row.added_by) {
-                  display = String(row.added_by);
-                }
-              }
-              addedBys.push(display);
-            } catch (e) {
-              addedBys.push(undefined);
-            }
-          } else {
-            addedBys.push(undefined);
-          }
-        } else {
-          sources.push('Mountix');
+    // 出典を判定: 内部DBのユーザー追加レコードは id に 'user-' プレフィックスを付与しています
+    const rid = String(r.id ?? '');
+    if (rid.startsWith('user-')) {
+      sources.push('Local');
+      const uid = rid.replace(/^user-/, '');
+      // 内部DBから追加者情報を取得
+      sourceLinks.push(`Local record: \`${uid}\``);
+      try {
+        const row = await prisma.userMountain.findUnique({ where: { id: uid }, select: { added_by: true } });
+        let display: string | undefined = undefined;
+        if (row?.added_by) {
           try {
-            sourceLinks.push(`<${MOUNTIX_BASE}/mountains/${encodeURIComponent(String(r.id))}>`);
+            const user = await interaction.client.users.fetch(String(row.added_by));
+            display = `${user.username}#${user.discriminator}`;
           } catch (_) {
-            sourceLinks.push(undefined);
+            display = `<@${String(row.added_by)}>`;
           }
-          addedBys.push(undefined);
         }
-
-  // 出典の裏取りのため Wikipedia のページ URL を取得しておきます
-        try {
-          const summary = await fetchWikipediaSummary(r.name).catch(() => undefined);
-          if (summary) {
-            const wikiPage = summary.content_urls?.desktop?.page ?? summary.canonical_url ?? `https://ja.wikipedia.org/wiki/${encodeURIComponent(summary.title)}`;
-            // 取得した Wikipedia URL を既存の sourceLinks に優先して追加します
-            const prev = sourceLinks[sourceLinks.length - 1];
-            sourceLinks[sourceLinks.length - 1] = prev ? `${prev}\n<${wikiPage}>` : `<${wikiPage}>`;
-          }
-        } catch (_) {
-          // Wiki の取得に失敗しても無視します
-        }
+        addedBys.push(display);
+      } catch (_) {
+        addedBys.push(undefined);
       }
+    } else {
+      sources.push('Mountix');
+      try {
+        sourceLinks.push(`<${MOUNTIX_BASE}/mountains/${encodeURIComponent(String(r.id))}>`);
+      } catch (_) {
+        sourceLinks.push(undefined);
+      }
+      addedBys.push(undefined);
+    }
+
+    // 出典の裏取りのため Wikipedia のページ URL を取得しておきます
+    try {
+      const summary = await fetchWikipediaSummary(r.name).catch(() => undefined);
+      if (summary) {
+        const wikiPage = summary.content_urls?.desktop?.page ?? summary.canonical_url ?? `https://ja.wikipedia.org/wiki/${encodeURIComponent(summary.title)}`;
+        // 取得した Wikipedia URL を既存の sourceLinks に優先して追加します
+        const prev = sourceLinks[sourceLinks.length - 1];
+        sourceLinks[sourceLinks.length - 1] = prev ? `${prev}\n<${wikiPage}>` : `<${wikiPage}>`;
+      }
+    } catch (_) {
+      // Wiki の取得に失敗しても無視します
+    }
+  }
 
       const buildEmbed = (pageIndex: number) => {
   const idx = pageIndex * perPage;
@@ -251,9 +263,12 @@ export default {
       const desc = `${r.name} — ${r.elevation ?? '不明'} m — ${place}` + (shortDesc ? `\n\n${shortDesc}` : '');
   const eb = formatEmbed(`${r.name} — ${idx + 1}/${rows.length}`, desc) as any;
   // サムネイルではなく大きめの画像を embed のメイン画像として表示します
+  log(`buildEmbed: idx=${idx}, name=${r.name}, thumbs[${idx}]=${thumbs[idx]?.substring(0, 50) ?? 'undefined'}`);
         if (thumbs[idx]) {
           log('mountain_search: setting image for', r.name, thumbs[idx]);
           eb.setImage?.(thumbs[idx]);
+        } else {
+          log('mountain_search: NO IMAGE for', r.name);
         }
   // /mountain_info と同様の出典情報を追加します
         const srcLabel = sources[idx] ?? '不明';

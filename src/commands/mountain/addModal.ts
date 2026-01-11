@@ -1,5 +1,5 @@
 import { ModalSubmitInteraction } from 'discord.js';
-import { supabase, prisma } from '../../utils/db';
+import { prisma } from '../../utils/db';
 import { log } from '../../utils/logger';
 import { normalizeMountainData, geocodeLocation } from '../../utils/normalize';
 
@@ -52,41 +52,14 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
       // If regex with Unicode properties isn't supported for some reason, skip this strict check
     }
 
-    const payload: any = {
-      name: normalized.name,
-      elevation: normalized.elevation ?? null,
-      location: coords ? JSON.stringify({ latitude: coords[0], longitude: coords[1] }) : (locationText || null),
-      description: normalized.description ?? (description || null),
-      photo_url: normalized.photo_url ?? null,
-      // For Supabase (Postgres) we keep `added_by` (uuid) null because the bot does not have
-      // the Supabase auth UUID for the Discord user. Instead save Discord snowflake to
-      // `discord_id` (text). The DB must have a `discord_id text` column added.
-      added_by: null,
-      discord_id: interaction.user.id,
-      approved: false,
-      created_at: new Date().toISOString(),
-    };
-
-    if (supabase) {
-      const { data, error } = await supabase.from('user_mountains').insert([payload]).select().single();
-      if (error) {
-        log('supabase insert error:', error);
-    await interaction.reply({ content: '登録に失敗しました。', flags: (await import('../../utils/flags')).EPHEMERAL });
-        return;
-      }
-  await interaction.reply({ content: `山「${data.name}」を登録しました（管理者承認待ち）。`, flags: (await import('../../utils/flags')).EPHEMERAL });
-      return;
-    }
-
-    // fallback prisma
+    // 内部保存（Prisma/SQLite）に登録
     const created = await prisma.userMountain.create({
       data: {
-        name: payload.name,
-        elevation: payload.elevation ?? undefined,
-        location: payload.location ?? undefined,
-        description: payload.description ?? undefined,
-        photo_url: payload.photo_url ?? undefined,
-        // Prisma fallback uses added_by string (Discord snowflake)
+        name: normalized.name,
+        elevation: normalized.elevation ?? undefined,
+        location: coords ? JSON.stringify({ latitude: coords[0], longitude: coords[1] }) : (locationText || undefined),
+        description: normalized.description ?? (description || undefined),
+        photo_url: normalized.photo_url ?? undefined,
         added_by: interaction.user.id,
         approved: false,
       },

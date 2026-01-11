@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 model UserMountain {
@@ -23,7 +23,16 @@ model UserMountain {
 model QuizQuestion {
   id        String   @id @default(uuid())
   question  String
-  options   Json
+  options   String // JSON文字列として保存（SQLite対応）
   answer    String
   image_url String?
+}
+
+model QuizScore {
+  id        String   @id @default(uuid())
+  user_id   String?  @unique
+  username  String
+  score     Int
+  time_ms   Int
+  created_at DateTime @default(now())
 }

@@ -1,6 +1,6 @@
 import axios from 'axios';
 import prefecturesData from './prefectures.json';
-import { supabase } from '../../utils/db';
+import { prisma } from '../../utils/db';
 import { normalizeForSearch, generateSearchVariants } from '../string';
 
 export const BASE = process.env.MOUNTIX_API_BASE || 'https://mountix.codemountains.org/api/v1';
@@ -54,7 +54,9 @@ function normalizeMountain(raw: any): Mountain {
   const description = raw.description ?? raw.summary ?? raw.overview ?? raw.note ?? raw.properties?.description ?? undefined;
   const tags = raw.tags ?? raw.properties?.tags ?? [];
   const prefectures = raw.prefectures ?? raw.properties?.prefectures ?? [];
-  const photo_url = raw.photo_url ?? raw.image ?? raw.image_url ?? raw.properties?.photo_url ?? undefined;
+  // Mountix APIは画像を提供していないため、photo_urlは常にundefinedにする
+  // 画像はWikipediaから自動取得される
+  const photo_url = undefined;
 
   return { id, name, nameKana, elevation, coords, gsiUrl: gsi, location: locationObj, description, tags, prefectures, photo_url, raw };
 }
@@ -107,17 +109,21 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
       }
     }
 
-    // Supabase から承認済みのユーザー追加山を検索して結合
+    // 内部DB（Prisma/SQLite）から承認済みのユーザー追加山を検索して結合
     try {
-      if (supabase && params.name) {
-        const { data } = await supabase.from('user_mountains').select('*').ilike('name', `%${params.name}%`).eq('approved', true).limit(params.limit ?? 50).order('created_at', { ascending: false });
-        if (data && Array.isArray(data)) {
-          const userMounts = (data as any[]).map(d => normalizeMountain({ id: `user-${d.id}`, name: d.name, elevation: d.elevation, location: d.location ? { raw: d.location } : undefined, description: d.description, photo_url: d.photo_url, properties: {}, prefectures: [] }));
+      if (params.name) {
+        const userMountsRaw = await prisma.userMountain.findMany({
+          where: { approved: true, name: { contains: params.name } },
+          orderBy: { created_at: 'desc' },
+          take: params.limit ?? 50,
+        });
+        if (userMountsRaw && Array.isArray(userMountsRaw)) {
+          const userMounts = userMountsRaw.map(d => normalizeMountain({ id: `user-${d.id}`, name: d.name, elevation: d.elevation ?? undefined, location: d.location ? { raw: d.location } : undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, properties: {}, prefectures: [] }));
           return userMounts.concat(results);
         }
       }
     } catch (e) {
-      // ignore supabase errors
+      // ignore local-db errors
     }
 
     return results;

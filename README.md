@@ -3,6 +3,17 @@
 
 # 🏔 Discord山荘Bot 開発ドキュメント
 
+## 🧳 内部保存（SQLite）への移行について
+
+このリポジトリは、Supabase（PostgreSQL）での保存から、軽量な内部保存（Prisma + SQLite）に移行しました。データは `prisma/dev.db` に保存されます。
+
+- セットアップ手順:
+	- 依存関係のインストール: `npm install`
+	- Prisma クライアント生成: `npm run prisma:generate`
+	- スキーマをDBへ反映: `npx prisma db push`
+
+クイズのスコアは `QuizScore` テーブル、ユーザー追加の山は `UserMountain` テーブルに保存されます。検索・承認・ランキングはすべて内部DBを使用します。
+
 ## 🌲 プロジェクト概要
 
 **Discord山荘 Bot**
@@ -30,7 +41,7 @@
 | 言語          | **TypeScript (Node.js)**                | 開発効率・型安全性ヨシ。                           |
 | Discord SDK | **discord.js v14**                      | 最新の Slash Command / Button / Embed に対応 |
 | API通信       | axios / node-fetch                      | JMA・MountixなどREST連携用                   |
-| DB          | **Supabase (PostgreSQL)**               | ユーザー投稿・クイズ・ランキング管理                     |
+| DB          | **Prisma + SQLite**                     | ユーザー投稿・クイズ・ランキング管理（ローカル保存）         |
 | ORM         | Prisma                                  | 型安全なDB操作をサポート                          |
 | 地図          | leaflet + leaflet-image / StaticMap API | GSIやOSMの地図描画                           |
 | スケジューラー     | node-cron                               | 定期天気通知など                               |

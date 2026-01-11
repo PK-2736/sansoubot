@@ -56,27 +56,47 @@ function writeCache(c: Cache) {
 async function fetchThumbnailForTitle(titleRaw: string): Promise<string | undefined> {
   try {
     const title = String(titleRaw);
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    };
+    
     // Try REST summary endpoint first to get original image
     const summaryUrl = `https://ja.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
     try {
-      const summaryRes = await axios.get(summaryUrl, { timeout: 5000 });
-  const original = summaryRes.data?.originalimage?.source;
-  if (original && typeof original === 'string') return ensureHttps(original);
-    } catch (e) {
+      const summaryRes = await axios.get(summaryUrl, { timeout: 5000, headers });
+      const original = summaryRes.data?.originalimage?.source;
+      if (original && typeof original === 'string') {
+        console.log(`[fetchThumbnailForTitle] Got image for "${title}" from summary`);
+        return ensureHttps(original);
+      }
+    } catch (e: any) {
+      console.log(`[fetchThumbnailForTitle] Summary endpoint failed for "${title}": ${e?.message}`);
       // ignore and fallback to pageimages
     }
 
     const apiUrl = `https://ja.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=1000&redirects=1`;
-    const res = await axios.get(apiUrl, { timeout: 5000 });
+    console.log(`[fetchThumbnailForTitle] Trying pageimages API for "${title}"`);
+    const res = await axios.get(apiUrl, { timeout: 5000, headers });
     const pages = res.data?.query?.pages;
-    if (!pages) return undefined;
+    if (!pages) {
+      console.log(`[fetchThumbnailForTitle] No pages returned for "${title}"`);
+      return undefined;
+    }
     const pageId = Object.keys(pages)[0];
     const page = pages[pageId];
-    if (!page) return undefined;
+    if (!page) {
+      console.log(`[fetchThumbnailForTitle] Page not found for "${title}"`);
+      return undefined;
+    }
     const thumb = page?.thumbnail?.source;
-    if (thumb && typeof thumb === 'string') return ensureHttps(thumb);
+    if (thumb && typeof thumb === 'string') {
+      console.log(`[fetchThumbnailForTitle] Got image for "${title}" from pageimages: ${thumb.substring(0, 50)}`);
+      return ensureHttps(thumb);
+    }
+    console.log(`[fetchThumbnailForTitle] No thumbnail found for "${title}", page:`, JSON.stringify(page));
     return undefined;
-  } catch (err) {
+  } catch (err: any) {
+    console.log(`[fetchThumbnailForTitle] Error for "${titleRaw}": ${err?.message}`);
     return undefined;
   }
 }
@@ -96,36 +116,71 @@ function ensureHttps(url: string): string {
 /**
  * 指定した山名から候補を作成し、Wikipedia の代表画像を取得します。
  * 取得結果はファイルにキャッシュされ、次回以降の API 呼び出しを削減します。
+ * 複数候補を並列で試し、最初に見つかった画像を返します。
  */
 export default async function fetchWikipediaImage(pageName: string, nameKana?: string): Promise<string | undefined> {
   if (!pageName) return undefined;
 
-  // キャッシュチェック
+  // キャッシュチェック（成功した結果のみキャッシュを信用する）
   const cache = readCache();
   const cached = cache[pageName];
-  if (cached !== undefined) return cached?.url ?? undefined;
+  if (cached !== undefined && cached.url !== null) {
+    console.log(`[fetchWikipediaImage] Cache hit for "${pageName}": ${cached.url?.substring(0, 50) ?? 'null'}`);
+    return cached?.url ?? undefined;
+  }
 
-  const candidates = new Set<string>();
-  candidates.add(pageName);
-  if (nameKana) candidates.add(nameKana);
-  // common suffixes
-  candidates.add(`${pageName} 山`);
-  candidates.add(`${pageName} 岳`);
-  candidates.add(`${pageName}（山）`);
-  candidates.add(`${pageName} (山)`);
+  console.log(`[fetchWikipediaImage] Starting fetch for "${pageName}" (kana: ${nameKana})`);
+  
+  // 山名から無効な文字（<>など）を削除してクリーンな名前を作成
+  // 例：「富士山<剣ヶ峯>」→「富士山」
+  const cleanName = pageName.replace(/<[^>]+>/g, '').trim();
+  const cleanNameKana = nameKana ? nameKana.replace(/<[^>]+>/g, '').trim() : undefined;
+  
+  const candidates: string[] = [];
+  // クリーンな名前を優先
+  if (cleanName && cleanName !== pageName) {
+    candidates.push(cleanName);
+    if (cleanNameKana && cleanNameKana !== nameKana) candidates.push(cleanNameKana);
+  }
+  // 元の名前も試す
+  candidates.push(pageName);
+  if (nameKana) candidates.push(nameKana);
+  // common suffixes to try
+  candidates.push(`${cleanName} 山`);
+  candidates.push(`${cleanName} 岳`);
+  candidates.push(`${cleanName}（山）`);
+  candidates.push(`${cleanName} (山)`);
+  // Remove duplicates
+  const uniqueCandidates = [...new Set(candidates)];
+  
+  console.log(`[fetchWikipediaImage] Trying ${uniqueCandidates.length} candidates for "${pageName}" (clean: "${cleanName}")`);
 
   let found: string | undefined;
-  for (const c of candidates) {
-    const img = await fetchThumbnailForTitle(c);
-    if (img) {
-      found = img;
+  // 並列ですべての候補を試して、最初に見つかったものを使用
+  const results = await Promise.allSettled(
+    uniqueCandidates.map(c => fetchThumbnailForTitle(c))
+  );
+  
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === 'fulfilled' && result.value) {
+      found = result.value;
+      console.log(`[fetchWikipediaImage] Found image at candidate ${i}: ${uniqueCandidates[i]}`);
       break;
     }
   }
 
-  // キャッシュ保存
-  cache[pageName] = { url: found ?? null, ts: Date.now() };
-  writeCache(cache);
+  if (found) {
+    console.log(`[fetchWikipediaImage] Successfully fetched for "${pageName}": ${found.substring(0, 50)}`);
+  } else {
+    console.log(`[fetchWikipediaImage] No image found for "${pageName}" after trying ${uniqueCandidates.length} candidates`);
+  }
+
+  // キャッシュ保存（成功した場合のみ保存）
+  if (found) {
+    cache[pageName] = { url: found, ts: Date.now() };
+    writeCache(cache);
+  }
 
   return found;
 }
