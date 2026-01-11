@@ -110,16 +110,20 @@ async function buildGeminiQuiz(): Promise<QuizQuestion[]> {
     log(`[QuizBuilder] Generating 7 new Gemini quizzes...`);
     const newQuizzes = await generateGeminiQuizQuestions(7);
     
+    log(`[QuizBuilder] Gemini API returned ${newQuizzes.length} quizzes`);
+    
     // 新規生成したクイズをDBに保存（履歴として）
     if (newQuizzes.length > 0) {
       await saveGeminiQuizQuestions(newQuizzes);
+    } else {
+      log(`[QuizBuilder] WARNING: No Gemini quizzes generated!`);
     }
     
     // 新規生成分を形式変換して追加
     for (const q of newQuizzes) {
       const answerIndex = q.options.indexOf(q.answer);
       if (answerIndex === -1) {
-        log(`[QuizBuilder] Skipping quiz: answer not found in options`);
+        log(`[QuizBuilder] Skipping quiz: answer "${q.answer}" not found in options: ${JSON.stringify(q.options)}`);
         continue;
       }
       
@@ -134,9 +138,10 @@ async function buildGeminiQuiz(): Promise<QuizQuestion[]> {
       });
     }
     
-    log(`[QuizBuilder] Total Gemini questions: ${questions.length}`);
+    log(`[QuizBuilder] Successfully converted ${questions.length} Gemini questions`);
   } catch (error: any) {
-    log(`[QuizBuilder] Error building Gemini quiz: ${error?.message ?? error}`);
+    log(`[QuizBuilder] ERROR building Gemini quiz: ${error?.message ?? error}`);
+    log(`[QuizBuilder] Stack trace: ${error?.stack}`);
   }
   
   return questions;
@@ -157,14 +162,25 @@ export async function buildQuiz(): Promise<QuizQuestion[]> {
     
     log(`[QuizBuilder] Generated ${mountixQuestions.length} Mountix, ${geminiQuestions.length} Gemini questions`);
     
+    // Geminiが失敗した場合、Mountixで補完
+    if (geminiQuestions.length === 0) {
+      log(`[QuizBuilder] WARNING: No Gemini questions generated. Using Mountix only.`);
+      log(`[QuizBuilder] Check GEMINI_API_KEY environment variable and API quota.`);
+    }
+    
     // 全問題を結合してシャッフル
     const allQuestions = [...mountixQuestions, ...geminiQuestions];
+    
+    if (allQuestions.length === 0) {
+      throw new Error('No questions generated from either Mountix or Gemini');
+    }
+    
     const shuffled = allQuestions.sort(() => Math.random() - 0.5);
     
     // 10問に調整（不足の場合はそのまま、超過の場合は切り詰め）
     const finalQuestions = shuffled.slice(0, 10);
     
-    log(`[QuizBuilder] Final quiz: ${finalQuestions.length} questions`);
+    log(`[QuizBuilder] Final quiz: ${finalQuestions.length} questions (${mountixQuestions.length} Mountix + ${geminiQuestions.length} Gemini)`);
     
     // 生成したクイズをタイムスタンプ付きでディスクにキャッシュ
     const filename = path.join(CACHE_DIR, `quiz_${Date.now()}.json`);

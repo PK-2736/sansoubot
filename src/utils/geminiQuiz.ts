@@ -70,7 +70,7 @@ export async function generateGeminiQuizQuestions(count: number = 7): Promise<Ge
     const response = result.response;
     const text = response.text();
     
-    log(`[GeminiQuiz] Raw response length: ${text.length}`);
+    log(`[GeminiQuiz] Raw response: ${text.substring(0, 200)}...`);
 
     // JSONを抽出（マークダウンのコードブロックなどを除去）
     let jsonText = text.trim();
@@ -78,9 +78,18 @@ export async function generateGeminiQuizQuestions(count: number = 7): Promise<Ge
     const jsonMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
     if (jsonMatch) {
       jsonText = jsonMatch[1];
+      log(`[GeminiQuiz] Extracted JSON from code block`);
     }
 
-    let questions: GeminiQuizQuestion[] = JSON.parse(jsonText);
+    let questions: GeminiQuizQuestion[];
+    try {
+      questions = JSON.parse(jsonText);
+      log(`[GeminiQuiz] Successfully parsed ${questions.length} questions from JSON`);
+    } catch (parseError: any) {
+      log(`[GeminiQuiz] JSON parse error: ${parseError.message}`);
+      log(`[GeminiQuiz] Failed JSON text: ${jsonText.substring(0, 500)}`);
+      throw new Error(`Failed to parse Gemini response as JSON: ${parseError.message}`);
+    }
     
     // 選択肢の重複チェック：重複がある問題は除外
     const validQuestions = questions.filter((q, idx) => {
