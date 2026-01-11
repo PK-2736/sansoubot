@@ -225,7 +225,7 @@ export default function createInteractionHandler(commands: CommandMap) {
   // コンフィグファイルは任意
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const cfg = await import('../../config/guild-commands.json');
-      guildCommandsMap = (cfg as any) || guildCommandsMap;
+      guildCommandsMap = (cfg as any)?.default || (cfg as any) || guildCommandsMap;
     } catch (_) {}
 
     const cmd = commands[interaction.commandName];
@@ -237,7 +237,7 @@ export default function createInteractionHandler(commands: CommandMap) {
   // このギルドでコマンドが許可されているかを確認
     const gid = interaction.guildId ?? 'default';
     const allowed = guildCommandsMap[gid] ?? guildCommandsMap['default'] ?? ['*'];
-    if (!(allowed.includes('*') || allowed.includes(interaction.commandName))) {
+    if (!(Array.isArray(allowed) && (allowed.includes('*') || allowed.includes(interaction.commandName)))) {
       await interaction.reply({ content: 'このコマンドは現在開発中のため利用できません。', flags: (await import('../utils/flags')).EPHEMERAL });
       return;
     }
