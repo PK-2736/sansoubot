@@ -5,7 +5,8 @@ import { formatEmbed } from '../../utils/format';
 export default {
   data: { name: 'quiz_rank' },
   async execute(interaction: ChatInputCommandInteraction) {
-    await interaction.deferReply();
+    const EPHEMERAL = (await import('../../utils/flags')).EPHEMERAL;
+    await interaction.deferReply({ flags: EPHEMERAL });
     try {
       const data = await prisma.quizScore.findMany({ orderBy: [{ score: 'desc' }, { time_ms: 'asc' }], take: 10 });
       if (!data || data.length === 0) {

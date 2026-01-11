@@ -153,6 +153,62 @@ export default function createInteractionHandler(commands: CommandMap) {
           // @ts-ignore - module or its type declaration may be missing at compile time
           const handler = await import('../commands/mountain/addModal');
           await handler.default(modal);
+        } else if (modal.customId === 'report_modal') {
+          // 不具合報告フォーム処理
+          try {
+            const title = modal.fields.getTextInputValue('report_title');
+            const details = modal.fields.getTextInputValue('report_details');
+            const steps = modal.fields.getTextInputValue('report_steps') || '（記入なし）';
+
+            // ユーザー情報を取得
+            const user = modal.user;
+            const guild = modal.guild;
+
+            // DM送信先のユーザーID
+            const REPORT_USER_ID = '726195003780628621';
+
+            try {
+              const reportUser = await interaction.client.users.fetch(REPORT_USER_ID);
+              const reportEmbed = (await import('discord.js')).EmbedBuilder
+                ? new (await import('discord.js')).EmbedBuilder()
+                : undefined;
+
+              if (reportEmbed) {
+                reportEmbed
+                  .setTitle('🚨 不具合報告')
+                  .setDescription(title)
+                  .addFields(
+                    { name: '報告者', value: `${user.username}#${user.discriminator}\n(ID: ${user.id})` },
+                    { name: 'ギルド', value: guild ? guild.name : 'DM' },
+                    { name: '詳細', value: details },
+                    { name: '再現手順', value: steps }
+                  )
+                  .setColor(0xff0000)
+                  .setTimestamp();
+
+                await reportUser.send({ embeds: [reportEmbed] });
+              } else {
+                // fallback
+                await reportUser.send(
+                  `🚨 不具合報告\n` +
+                  `タイトル: ${title}\n` +
+                  `報告者: ${user.username} (ID: ${user.id})\n` +
+                  `ギルド: ${guild?.name || 'DM'}\n` +
+                  `詳細: ${details}\n` +
+                  `再現手順: ${steps}`
+                );
+              }
+
+              log(`[Report] Sent report to ${REPORT_USER_ID}: ${title}`);
+              await modal.reply({ content: '✅ 不具合報告を送信しました。ご協力ありがとうございます！', flags: (await import('../utils/flags')).EPHEMERAL });
+            } catch (dmError: any) {
+              log('[Report] Failed to send DM:', dmError?.message ?? dmError);
+              await modal.reply({ content: '❌ 報告の送信に失敗しました。管理者に直接ご連絡ください。', flags: (await import('../utils/flags')).EPHEMERAL });
+            }
+          } catch (parseError: any) {
+            log('[Report] Error parsing modal fields:', parseError?.message ?? parseError);
+            await modal.reply({ content: 'フォーム情報の読み込みに失敗しました。', flags: (await import('../utils/flags')).EPHEMERAL });
+          }
         }
       } catch (err) {
         log('modal handler error:', err);

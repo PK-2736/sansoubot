@@ -15,6 +15,7 @@ import mapRoute from './commands/map/route';
 import quizStart from './commands/quiz/start';
 import quizRank from './commands/quiz/rank';
 import adminApprove from './commands/admin/approve';
+import report from './commands/report';
 
 // 登録用のメタ情報（説明付き + オプション）
 const commandsForRegistration = [
@@ -57,6 +58,7 @@ const commandsForRegistration = [
   { name: quizStart.data.name, description: '山クイズを開始' },
   { name: quizRank.data.name, description: 'クイズのランキングを表示' },
   { name: adminApprove.data.name, description: 'ユーザー投稿山の承認（管理者用）' },
+  { name: report.data.name, description: 'botに不具合があった場合はこちらから報告' },
 ];
 
 // 実行用マップ
@@ -71,6 +73,7 @@ const commandMap: Record<string, (i: any) => Promise<void>> = {
   [quizStart.data.name]: quizStart.execute,
   [quizRank.data.name]: quizRank.execute,
   [adminApprove.data.name]: adminApprove.execute,
+  [report.data.name]: report.execute,
 };
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });

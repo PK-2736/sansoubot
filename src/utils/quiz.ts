@@ -100,45 +100,85 @@ async function buildMountixQuiz(): Promise<QuizQuestion[]> {
 }
 
 /**
- * Geminiクイズを7問生成（毎回新規生成）
+ * Geminiクイズを7問生成（キャッシュ優先）
+ * - 既存のDBに保存済みクイズがあれば、一部を再利用
+ * - 不足分は新規生成
  */
 async function buildGeminiQuiz(): Promise<QuizQuestion[]> {
   const questions: QuizQuestion[] = [];
+  const targetCount = 7;
   
   try {
-    // 毎回新規生成（キャッシュを使わない）
-    log(`[QuizBuilder] Generating 7 new Gemini quizzes...`);
-    const newQuizzes = await generateGeminiQuizQuestions(7);
+    // 1. DBに保存済みのGeminiクイズを取得
+    log(`[QuizBuilder] Fetching cached Gemini quizzes from DB...`);
+    const cachedQuizzes = await getGeminiQuizQuestions(targetCount * 2); // 候補を多めに取得
     
-    log(`[QuizBuilder] Gemini API returned ${newQuizzes.length} quizzes`);
+    let newQuizzesNeeded = targetCount;
     
-    // 新規生成したクイズをDBに保存（履歴として）
-    if (newQuizzes.length > 0) {
-      await saveGeminiQuizQuestions(newQuizzes);
-    } else {
-      log(`[QuizBuilder] WARNING: No Gemini quizzes generated!`);
+    // 2. キャッシュから一部を使用
+    if (cachedQuizzes && cachedQuizzes.length > 0) {
+      const usedFromCache = Math.min(cachedQuizzes.length, targetCount - 2); // 最低でも2問は新規生成
+      for (const q of cachedQuizzes.slice(0, usedFromCache)) {
+        try {
+          const options = typeof q.options === 'string' ? JSON.parse(q.options) : q.options;
+          const answerIndex = options.indexOf(q.answer);
+          if (answerIndex === -1) {
+            log(`[QuizBuilder] Skipping cached quiz: answer not in options`);
+            continue;
+          }
+          questions.push({
+            id: `cached_${q.id}`,
+            type: 'gemini',
+            prompt: q.question,
+            choices: options,
+            answerIndex,
+            meta: { source: 'gemini_cached', db_id: q.id },
+            answerText: q.answer,
+          });
+          newQuizzesNeeded--;
+        } catch (e) {
+          log(`[QuizBuilder] Error parsing cached quiz ${q.id}:`, e);
+        }
+      }
+      log(`[QuizBuilder] Using ${questions.length} cached Gemini quizzes, need ${newQuizzesNeeded} new ones`);
     }
     
-    // 新規生成分を形式変換して追加
-    for (const q of newQuizzes) {
-      const answerIndex = q.options.indexOf(q.answer);
-      if (answerIndex === -1) {
-        log(`[QuizBuilder] Skipping quiz: answer "${q.answer}" not found in options: ${JSON.stringify(q.options)}`);
-        continue;
+    // 3. 不足分は新規生成
+    if (newQuizzesNeeded > 0) {
+      log(`[QuizBuilder] Generating ${newQuizzesNeeded} new Gemini quizzes...`);
+      const newQuizzes = await generateGeminiQuizQuestions(newQuizzesNeeded);
+      
+      log(`[QuizBuilder] Gemini API returned ${newQuizzes.length} quizzes`);
+      
+      // 新規生成したクイズをDBに保存（履歴として）
+      if (newQuizzes.length > 0) {
+        await saveGeminiQuizQuestions(newQuizzes);
+      } else {
+        log(`[QuizBuilder] WARNING: No Gemini quizzes generated!`);
       }
       
-      questions.push({
-        id: `gemini_${Date.now()}_${Math.random()}`,
-        type: 'gemini',
-        prompt: q.question,
-        choices: q.options,
-        answerIndex,
-        meta: { source: 'gemini' },
-        answerText: q.answer,
-      });
+      // 新規生成分を形式変換して追加
+      for (const q of newQuizzes) {
+        const answerIndex = q.options.indexOf(q.answer);
+        if (answerIndex === -1) {
+          log(`[QuizBuilder] Skipping quiz: answer "${q.answer}" not found in options: ${JSON.stringify(q.options)}`);
+          continue;
+        }
+        
+        questions.push({
+          id: `gemini_${Date.now()}_${Math.random()}`,
+          type: 'gemini',
+          prompt: q.question,
+          choices: q.options,
+          answerIndex,
+          meta: { source: 'gemini_new' },
+          answerText: q.answer,
+        });
+      }
+      
+      log(`[QuizBuilder] Successfully converted ${newQuizzes.length} new Gemini questions`);
     }
     
-    log(`[QuizBuilder] Successfully converted ${questions.length} Gemini questions`);
   } catch (error: any) {
     log(`[QuizBuilder] ERROR building Gemini quiz: ${error?.message ?? error}`);
     log(`[QuizBuilder] Stack trace: ${error?.stack}`);
