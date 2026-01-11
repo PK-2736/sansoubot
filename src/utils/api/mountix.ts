@@ -113,13 +113,16 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
     try {
       if (params.name) {
         const userMountsRaw = await prisma.userMountain.findMany({
-          where: { approved: true, name: { contains: params.name } },
+          where: { approved: true },
           orderBy: { created_at: 'desc' },
-          take: params.limit ?? 50,
+          take: params.limit ?? 200,
         });
         if (userMountsRaw && Array.isArray(userMountsRaw)) {
-          const userMounts = userMountsRaw.map(d => normalizeMountain({ id: `user-${d.id}`, name: d.name, elevation: d.elevation ?? undefined, location: d.location ? { raw: d.location } : undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, properties: {}, prefectures: [] }));
-          return userMounts.concat(results);
+          const q = String(params.name).toLowerCase();
+          const userMounts = userMountsRaw
+            .filter(d => String(d.name ?? '').toLowerCase().includes(q))
+            .map(d => normalizeMountain({ id: `user-${d.id}`, name: d.name, elevation: d.elevation ?? undefined, location: d.location ? { raw: d.location } : undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, properties: {}, prefectures: [] }));
+          if (userMounts.length) return userMounts.concat(results);
         }
       }
     } catch (e) {
