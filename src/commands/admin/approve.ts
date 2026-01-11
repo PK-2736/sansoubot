@@ -50,8 +50,8 @@ export default {
         });
         // 各山ごとに選択トグルボタン
         const rows = [];
-        for (let i = 0; i < pending.length; i += 5) {
-          const btns = pending.slice(i, i + 5).map(item =>
+        for (let i = 0; i < pending.length; i += 4) {
+          const btns = pending.slice(i, i + 4).map(item =>
             new ButtonBuilder()
               .setCustomId(`toggle_${item.id}`)
               .setLabel(`${selected[item.id] ? '選択解除' : '選択'}`)
@@ -59,13 +59,17 @@ export default {
           );
           rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...btns).toJSON());
         }
-        // 一括承認ボタン
+        // 一括承認ボタンと却下ボタンを追加
         const approveBtn = new ButtonBuilder()
           .setCustomId('approve_selected')
           .setLabel('選択した山を一括承認')
           .setStyle(ButtonStyle.Success)
           .setDisabled(!Object.values(selected).some(v => v));
-        rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(approveBtn).toJSON());
+        const individualRejectBtn = new ButtonBuilder()
+          .setCustomId('reject_individual')
+          .setLabel('個別却下（モーダル）')
+          .setStyle(ButtonStyle.Danger);
+        rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(approveBtn, individualRejectBtn).toJSON());
         return { embeds, components: rows };
       };
 
@@ -83,9 +87,83 @@ export default {
             const toApprove = pending.filter(item => selected[item.id]);
             for (const item of toApprove) {
               await prisma.userMountain.update({ where: { id: item.id }, data: { approved: true } });
+              
+              // 投稿者にDM送信
+              if (item.added_by) {
+                try {
+                  const addedByUser = await interaction.client.users.fetch(item.added_by);
+                  const { EmbedBuilder } = await import('discord.js');
+                  const approveEmbed = new EmbedBuilder()
+                    .setTitle('✅ 山が承認されました！')
+                    .setDescription(item.name)
+                    .setColor(0x4caf50)
+                    .setTimestamp();
+
+                  await addedByUser.send({ embeds: [approveEmbed] });
+                } catch (dmErr: any) {
+                  log('[AdminApprove] Failed to send DM:', dmErr?.message);
+                }
+              }
             }
-            await interaction.editReply({ content: `承認しました: ${toApprove.map(i => i.name).join(', ')}`, embeds: [], components: [] });
+            await interaction.editReply({ content: `承認しました: ${toApprove.map(i => i.name).join(', ')}\n投稿者にDMを送信しました。`, embeds: [], components: [] });
             collector.stop('done');
+          } else if (btn.customId === 'reject_individual') {
+            // 却下する山を選択するためにmessageを更新
+            const { StringSelectMenuBuilder, ActionRowBuilder } = await import('discord.js');
+            const selectMenu = new StringSelectMenuBuilder()
+              .setCustomId('select_reject_mountain')
+              .setPlaceholder('却下する山を選択')
+              .setMaxValues(1)
+              .addOptions(
+                pending.map((item) => ({
+                  label: item.name,
+                  value: item.id,
+                  description: `ID: ${item.id.substring(0, 8)}...`,
+                }))
+              );
+
+            const selectRow = new ActionRowBuilder().addComponents(selectMenu).toJSON();
+            const replyMsg = await interaction.editReply({ content: '却下する山を選択してください:', components: [selectRow] }) as any;
+            
+            // セレクトメニューの入力を待機
+            const selectCollector = replyMsg.createMessageComponentCollector({ 
+              filter: (i: any) => i.user.id === interaction.user.id,
+              time: 60000 
+            });
+            
+            selectCollector?.on('collect', async (selectInteraction: any) => {
+              try {
+                await selectInteraction.deferUpdate();
+                const mountainId = selectInteraction.values[0];
+                const mountain = pending.find((m: any) => m.id === mountainId);
+                
+                if (!mountain) {
+                  await selectInteraction.reply({ content: '山が見つかりません。', ephemeral: true });
+                  return;
+                }
+
+                // モーダルを表示
+                const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = await import('discord.js');
+                const modal = new ModalBuilder()
+                  .setCustomId(`mountain_reject_reason_${mountainId}`)
+                  .setTitle('却下理由');
+
+                const reasonInput = new TextInputBuilder()
+                  .setCustomId('reject_reason')
+                  .setLabel('却下理由')
+                  .setStyle(TextInputStyle.Paragraph)
+                  .setPlaceholder('例：不適切な内容です')
+                  .setRequired(true)
+                  .setMaxLength(500);
+
+                const row = new ActionRowBuilder().addComponents(reasonInput);
+                modal.addComponents(row as any);
+                await selectInteraction.showModal(modal);
+                selectCollector.stop('modal_shown');
+              } catch (err: any) {
+                log('[AdminApprove] Select error:', err?.message);
+              }
+            });
           }
         } catch (e: any) {
           log('admin_approve collect error:', e);

@@ -13,6 +13,78 @@ export default function createInteractionHandler(commands: CommandMap) {
     try {
       if (interaction.isButton && interaction.isButton()) {
         const id = interaction.customId;
+        
+        // 山の承認・却下ボタン
+        if (id && id.startsWith('mountain_approve_')) {
+          const mountainId = id.replace('mountain_approve_', '');
+          try {
+            const mountain = await prisma.userMountain.findUnique({ where: { id: mountainId } });
+            if (!mountain) {
+              await interaction.reply({ content: '山が見つかりません。', flags: (await import('../utils/flags')).EPHEMERAL });
+              return;
+            }
+
+            // 承認
+            await prisma.userMountain.update({ where: { id: mountainId }, data: { approved: true } });
+
+            // 投稿者にDM送信
+            if (mountain.added_by) {
+              try {
+                const addedByUser = await interaction.client.users.fetch(mountain.added_by);
+                const approveEmbed = new (await import('discord.js')).EmbedBuilder()
+                .setTitle('✅ 山が承認されました！')
+                .setDescription(mountain.name)
+                .setColor(0x4caf50)
+                .setTimestamp();
+
+                await addedByUser.send({ embeds: [approveEmbed] });
+                log(`[MountainApprove] Sent approval DM to ${mountain.added_by}`);
+              } catch (dmErr: any) {
+                log('[MountainApprove] Failed to send DM:', dmErr?.message);
+              }
+            }
+
+            await interaction.reply({ content: `✅ 山「${mountain.name}」を承認しました。投稿者にDMを送信しました。`, flags: (await import('../utils/flags')).EPHEMERAL });
+          } catch (err: any) {
+            log('[MountainApprove] Error:', err?.message);
+            await interaction.reply({ content: '承認処理に失敗しました。', flags: (await import('../utils/flags')).EPHEMERAL });
+          }
+          return;
+        }
+
+        if (id && id.startsWith('mountain_reject_')) {
+          const mountainId = id.replace('mountain_reject_', '');
+          try {
+            const mountain = await prisma.userMountain.findUnique({ where: { id: mountainId } });
+            if (!mountain) {
+              await interaction.reply({ content: '山が見つかりません。', flags: (await import('../utils/flags')).EPHEMERAL });
+              return;
+            }
+
+            // モーダルを表示
+            const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = await import('discord.js');
+            const modal = new ModalBuilder()
+              .setCustomId(`mountain_reject_reason_${mountainId}`)
+              .setTitle('却下理由');
+
+            const reasonInput = new TextInputBuilder()
+              .setCustomId('reject_reason')
+              .setLabel('却下理由')
+              .setStyle(TextInputStyle.Paragraph)
+              .setPlaceholder('例：不適切な内容です')
+              .setRequired(true)
+              .setMaxLength(500);
+
+            const row = new ActionRowBuilder().addComponents(reasonInput);
+            modal.addComponents(row as any);
+            await interaction.showModal(modal);
+          } catch (err: any) {
+            log('[MountainReject] Error showing modal:', err?.message);
+            await interaction.reply({ content: 'モーダル表示に失敗しました。', flags: (await import('../utils/flags')).EPHEMERAL });
+          }
+          return;
+        }
+        
         if (id && id.startsWith('quiz:')) {
           // start/giveup/answer:<idx>（開始・回答等のカスタム ID）
           if (id === 'quiz:start') {
@@ -208,6 +280,48 @@ export default function createInteractionHandler(commands: CommandMap) {
           } catch (parseError: any) {
             log('[Report] Error parsing modal fields:', parseError?.message ?? parseError);
             await modal.reply({ content: 'フォーム情報の読み込みに失敗しました。', flags: (await import('../utils/flags')).EPHEMERAL });
+          }
+        } else if (modal.customId.startsWith('mountain_reject_reason_')) {
+          // 山却下理由モーダル処理
+          try {
+            const mountainId = modal.customId.replace('mountain_reject_reason_', '');
+            const reason = modal.fields.getTextInputValue('reject_reason');
+
+            // 投稿者の情報を取得
+            const mountain = await prisma.userMountain.findUnique({ where: { id: mountainId } });
+            if (!mountain) {
+              await modal.reply({ content: '山情報が見つかりません。', flags: (await import('../utils/flags')).EPHEMERAL });
+              return;
+            }
+
+            // 山を削除
+            await prisma.userMountain.delete({ where: { id: mountainId } });
+
+            // 投稿者にDM送信
+            if (mountain.added_by) {
+              try {
+                const addedByUser = await interaction.client.users.fetch(mountain.added_by);
+                const rejectEmbed = new (await import('discord.js')).EmbedBuilder()
+                  .setTitle('⛔ 山の追加が却下されました')
+                  .setDescription(mountain.name)
+                  .addFields(
+                    { name: '理由', value: reason },
+                    { name: '日時', value: new Date().toLocaleString('ja-JP') }
+                  )
+                  .setColor(0xff5722)
+                  .setTimestamp();
+
+                await addedByUser.send({ embeds: [rejectEmbed] });
+                log(`[MountainReject] Sent rejection DM to ${mountain.added_by}`);
+              } catch (dmErr: any) {
+                log('[MountainReject] Failed to send DM:', dmErr?.message);
+              }
+            }
+
+            await modal.reply({ content: `✅ 山「${mountain.name}」を却下しました。投稿者にDMを送信しました。`, flags: (await import('../utils/flags')).EPHEMERAL });
+          } catch (parseErr: any) {
+            log('[MountainReject] Error:', parseErr?.message);
+            await modal.reply({ content: '却下処理に失敗しました。', flags: (await import('../utils/flags')).EPHEMERAL });
           }
         }
       } catch (err) {

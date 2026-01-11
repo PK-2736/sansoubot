@@ -37,21 +37,6 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
       return;
     }
 
-    // Name must include Kanji, Katakana and Hiragana characters
-    // 漢字: \p{Script=Han}, カタカナ: \p{Script=Katakana}, ひらがな: \p{Script=Hiragana}
-    try {
-      const n = String(rawName || '').trim();
-      const hasKanji = /\p{Script=Han}/u.test(n);
-      const hasKatakana = /\p{Script=Katakana}/u.test(n);
-      const hasHiragana = /\p{Script=Hiragana}/u.test(n);
-      if (!(hasKanji && hasKatakana && hasHiragana)) {
-  await interaction.reply({ content: '山名は漢字・カタカナ・ひらがなのすべてを含めて入力してください（例: 富士ふじフジ）。', flags: (await import('../../utils/flags')).EPHEMERAL });
-        return;
-      }
-    } catch (e) {
-      // If regex with Unicode properties isn't supported for some reason, skip this strict check
-    }
-
     // 内部保存（Prisma/SQLite）に登録
     const created = await prisma.userMountain.create({
       data: {
@@ -64,6 +49,41 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
         approved: false,
       },
     });
+
+    // チャンネルに通知送信（1459847925092978709）
+    const notificationChannelId = '1459847925092978709';
+    try {
+      const notifChannel = await interaction.client.channels.fetch(notificationChannelId).catch(() => null);
+      if (notifChannel && notifChannel.isTextBased()) {
+        const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = await import('discord.js');
+        const embed = new EmbedBuilder()
+          .setTitle('📢 新しい山が追加されました')
+          .setDescription(`新規投稿山の承認待ち`)
+          .addFields(
+            { name: '山名', value: created.name, inline: false },
+            { name: '標高', value: created.elevation ? `${created.elevation}m` : '未設定', inline: true },
+            { name: '説明', value: created.description ?? '(なし)', inline: false },
+            { name: '投稿者', value: `<@${created.added_by}>`, inline: true },
+            { name: '投稿ID', value: created.id, inline: true }
+          )
+          .setColor(0x4caf50)
+          .setTimestamp();
+        
+        const approveBtn = new ButtonBuilder()
+          .setCustomId(`mountain_approve_${created.id}`)
+          .setLabel('承認')
+          .setStyle(ButtonStyle.Success);
+        const rejectBtn = new ButtonBuilder()
+          .setCustomId(`mountain_reject_${created.id}`)
+          .setLabel('却下')
+          .setStyle(ButtonStyle.Danger);
+        
+        const row = new ActionRowBuilder().addComponents(approveBtn, rejectBtn).toJSON();
+        await (notifChannel as any).send({ embeds: [embed], components: [row] });
+      }
+    } catch (e) {
+      log('[AddModal] Failed to send notification:', e);
+    }
 
   await interaction.reply({ content: `山「${created.name}」を登録しました（管理者承認待ち）。`, flags: (await import('../../utils/flags')).EPHEMERAL });
   } catch (err) {
