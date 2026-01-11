@@ -38,7 +38,7 @@ export default {
   if (!interaction.deferred && !interaction.replied) {
     try { await interaction.deferReply(); } catch (e: any) { log('mountain_search: deferReply failed at start:', e?.message ?? e); }
   }
-  const nameOption = interaction.options?.getString && interaction.options.getString('name') ? interaction.options.getString('name')! : undefined;
+  const nameOption = interaction.options?.getString && interaction.options.getString('山名') ? interaction.options.getString('山名')! : undefined;
   const idOption = interaction.options?.getString && interaction.options.getString('id') ? interaction.options.getString('id')! : undefined;
 
     try {
@@ -161,8 +161,8 @@ export default {
       // 長時間処理する可能性があるため早めに defer して Interaction の有効期限切れを防ぐ
   // defer は interactionCreate 側で中央管理されています。ここで再度 defer して二重 ACK にならないように注意してください
   const params: any = {};
-  // name オプションを優先して扱います
-  if (nameOption) params.name = nameOption;
+  // 山名は必須引数なのでそのまま使用
+  params.name = nameOption;
       // 追加オプション: tag / prefecture / offset / sort をオプションで渡す作りにしていればここで収集できます
 
       const rows = await searchMountains(params);

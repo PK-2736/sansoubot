@@ -30,8 +30,7 @@ const commandsForRegistration = [
     name: mountainSearch.data.name,
     description: '山を検索',
     options: [
-      { name: 'name', description: '山名で検索（部分一致）', type: ApplicationCommandOptionType.String, required: false },
-  // limit オプションは削除されました
+      { name: '山名', description: '山名で検索（部分一致）', type: ApplicationCommandOptionType.String, required: true },
     ],
   },
   // weather_forecast と map_route は未完成のため非表示
