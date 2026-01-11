@@ -10,6 +10,7 @@ datasource db {
 model UserMountain {
   id          String   @id @default(uuid())
   name        String
+  nameKana    String?
   elevation   Int?
   location    String?
   description String?

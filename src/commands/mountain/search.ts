@@ -63,7 +63,7 @@ export default {
           const byName = byId ? null : await prisma.userMountain.findFirst({ where: { name: { contains: qid } } }).catch(() => null);
           const d: any = byId ?? byName;
           if (d) {
-            m = { id: `user-${d.id}`, name: d.name, elevation: d.elevation ?? undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, prefectures: [], coords: undefined };
+            m = { id: `user-${d.id}`, name: d.name, nameKana: d.nameKana ?? undefined, elevation: d.elevation ?? undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, prefectures: [], coords: undefined };
             source = 'Local';
             addedBy = d.added_by ?? undefined;
             if (addedBy && interaction.client && typeof interaction.client.users?.fetch === 'function') {
@@ -94,8 +94,9 @@ export default {
         }
 
         const norm = normalizeMountainData({ id: m.id, name: m.name, elevation: m.elevation, coords: m.coords, description: m.description, photo_url: m.photo_url, source });
+        const displayName = (m as any).nameKana ? `${norm.name}（${(m as any).nameKana}）` : norm.name;
         const lines = [
-          `名前: ${norm.name}`,
+          `名前: ${displayName}`,
           `標高: ${norm.elevation ?? '不明'} m`,
           `場所: ${m.prefectures && m.prefectures.length ? m.prefectures.join(', ') : (m.gsiUrl ?? '不明')}`,
           norm.description ? `\n📝 説明:\n${norm.description}` : '',
@@ -260,8 +261,10 @@ export default {
   const r = rows[idx];
       const shortDesc = r.description ? (String(r.description).replace(/\s+/g,' ').slice(0,140) + (String(r.description).length > 140 ? '…' : '')) : '';
       const place = r.prefectures?.join ? r.prefectures.join(', ') : '不明';
-      const desc = `${r.name} — ${r.elevation ?? '不明'} m — ${place}` + (shortDesc ? `\n\n${shortDesc}` : '');
-  const eb = formatEmbed(`${r.name} — ${idx + 1}/${rows.length}`, desc) as any;
+      // 漢字のみを表示（nameKanaがあれば除外）
+      const displayName = r.name;
+      const desc = `${displayName} — ${r.elevation ?? '不明'} m — ${place}` + (shortDesc ? `\n\n${shortDesc}` : '');
+  const eb = formatEmbed(`${displayName} — ${idx + 1}/${rows.length}`, desc) as any;
   // サムネイルではなく大きめの画像を embed のメイン画像として表示します
   log(`buildEmbed: idx=${idx}, name=${r.name}, thumbs[${idx}]=${thumbs[idx]?.substring(0, 50) ?? 'undefined'}`);
         if (thumbs[idx]) {

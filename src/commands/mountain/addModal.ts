@@ -2,6 +2,7 @@ import { ModalSubmitInteraction } from 'discord.js';
 import { prisma } from '../../utils/db';
 import { log } from '../../utils/logger';
 import { normalizeMountainData, geocodeLocation } from '../../utils/normalize';
+import { parseMountainName } from '../../utils/string';
 
 export default async function handleAddModal(interaction: ModalSubmitInteraction) {
   try {
@@ -9,6 +10,9 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
     const elevationStr = interaction.fields.getTextInputValue('elevation') ?? '';
     const locationText = interaction.fields.getTextInputValue('location') ?? '';
     const description = interaction.fields.getTextInputValue('description') ?? '';
+
+    // 山名を解析して漢字部分とよみがな部分に分離
+    const { name, nameKana } = parseMountainName(rawName);
 
     // parse elevation
     let elevation: number | undefined = undefined;
@@ -22,7 +26,7 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
     }
 
     // initial normalize
-    const normalized = normalizeMountainData({ name: rawName, elevation, description });
+    const normalized = normalizeMountainData({ name, elevation, description });
 
     // If coords missing and user provided a location text, try geocoding (Nominatim)
     let coords = normalized.coords;
@@ -41,6 +45,7 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
     const created = await prisma.userMountain.create({
       data: {
         name: normalized.name,
+        nameKana: nameKana,
         elevation: normalized.elevation ?? undefined,
         location: coords ? JSON.stringify({ latitude: coords[0], longitude: coords[1] }) : (locationText || undefined),
         description: normalized.description ?? (description || undefined),
@@ -56,11 +61,12 @@ export default async function handleAddModal(interaction: ModalSubmitInteraction
       const notifChannel = await interaction.client.channels.fetch(notificationChannelId).catch(() => null);
       if (notifChannel && notifChannel.isTextBased()) {
         const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = await import('discord.js');
+        const displayName = created.nameKana ? `${created.name}（${created.nameKana}）` : created.name;
         const embed = new EmbedBuilder()
           .setTitle('📢 新しい山が追加されました')
           .setDescription(`新規投稿山の承認待ち`)
           .addFields(
-            { name: '山名', value: created.name, inline: false },
+            { name: '山名', value: displayName, inline: false },
             { name: '標高', value: created.elevation ? `${created.elevation}m` : '未設定', inline: true },
             { name: '説明', value: created.description ?? '(なし)', inline: false },
             { name: '投稿者', value: `<@${created.added_by}>`, inline: true },

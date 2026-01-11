@@ -94,7 +94,8 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
           const userMounts = userMountsRaw
             .filter(d => {
               const n = normalizeForSearch(d.name ?? '');
-              const nvars = generateSearchVariants(n);
+              const nKana = normalizeForSearch(d.nameKana ?? '');
+              const nvars = [...generateSearchVariants(n), ...generateSearchVariants(nKana)];
               for (const qv of qvars) {
                 for (const nv of nvars) {
                   if (nv.includes(qv) || qv.includes(nv)) return true;
@@ -102,7 +103,7 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
               }
               return false;
             })
-            .map(d => normalizeMountain({ id: `user-${d.id}`, name: d.name, elevation: d.elevation ?? undefined, location: d.location ? { raw: d.location } : undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, properties: {}, prefectures: [] }));
+            .map(d => normalizeMountain({ id: `user-${d.id}`, name: d.name, nameKana: d.nameKana ?? undefined, elevation: d.elevation ?? undefined, location: d.location ? { raw: d.location } : undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, properties: {}, prefectures: [] }));
           if (userMounts.length) results = userMounts.concat(results);
         }
       }
