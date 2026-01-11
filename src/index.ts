@@ -65,8 +65,9 @@ const commandMap: Record<string, (i: any) => Promise<void>> = {
   [help.data.name]: help.execute,
   [mountainAdd.data.name]: mountainAdd.execute,
   [mountainSearch.data.name]: mountainSearch.execute,
-  [weatherForecast.data.name]: weatherForecast.execute,
-  [mapRoute.data.name]: mapRoute.execute,
+  // weatherForecast と mapRoute は非表示（未完成）
+  // [weatherForecast.data.name]: weatherForecast.execute,
+  // [mapRoute.data.name]: mapRoute.execute,
   [quizStart.data.name]: quizStart.execute,
   [quizRank.data.name]: quizRank.execute,
   [adminApprove.data.name]: adminApprove.execute,

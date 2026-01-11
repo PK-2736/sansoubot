@@ -29,12 +29,31 @@ export default function createInteractionHandler(commands: CommandMap) {
             const q = s.questions[0];
             // 選択肢用のボタンを作成
             const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js');
-            const row = new ActionRowBuilder<any>();
-            q.choices.forEach((c, idx) => row.addComponents(new ButtonBuilder().setCustomId(`quiz:answer:${encodeURIComponent(key)}:${idx}`).setLabel(c).setStyle(ButtonStyle.Primary)));
+            const answerRow = new ActionRowBuilder<any>();
+            q.choices.forEach((c, idx) => answerRow.addComponents(new ButtonBuilder().setCustomId(`quiz:answer:${encodeURIComponent(key)}:${idx}`).setLabel(c).setStyle(ButtonStyle.Primary)));
+            // リタイヤボタンを追加
+            const quitRow = new ActionRowBuilder<any>().addComponents(
+              new ButtonBuilder().setCustomId(`quiz:quit:${encodeURIComponent(key)}`).setLabel('リタイヤ').setStyle(ButtonStyle.Danger)
+            );
             // 埋め込みメッセージで元メッセージを更新（シングルメッセージ運用）
             const { EmbedBuilder } = await import('discord.js');
             const eb = new EmbedBuilder().setTitle(`問題 1/${s.questions.length}`).setDescription(q.prompt).addFields({ name: '選択肢', value: q.choices.map((c, i) => `${i + 1}. ${c}`).join('\n') }).setFooter({ text: `暫定 正答: 0 | 経過: 0s` });
-            await interaction.update({ embeds: [eb], components: [row] });
+            await interaction.update({ embeds: [eb], components: [answerRow, quitRow] });
+            return;
+          }
+          // リタイヤボタンの処理
+          if (id.startsWith('quiz:quit:')) {
+            const parts = id.split(':');
+            const key = decodeURIComponent(parts[2]);
+            const s = quizState.getSession(key);
+            if (!s) {
+              await interaction.update({ content: 'セッションが見つかりません。', components: [] }).catch(() => {});
+              return;
+            }
+            quizState.deleteSession(key);
+            const { EmbedBuilder } = await import('discord.js');
+            const eb = new EmbedBuilder().setTitle('クイズをリタイヤしました').setDescription(`${s.current}問目でリタイヤ\n正答数: ${s.correct}/${s.current}`).setColor(0xff0000);
+            await interaction.update({ embeds: [eb], components: [] }).catch(() => {});
             return;
           }
           // (giveup button removed)
@@ -106,11 +125,15 @@ export default function createInteractionHandler(commands: CommandMap) {
               const next = s.questions[s.current];
               s.startAt = Date.now();
               const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js');
-              const row = new ActionRowBuilder<any>();
-              next.choices.forEach((c, i) => row.addComponents(new ButtonBuilder().setCustomId(`quiz:answer:${encodeURIComponent(key)}:${i}`).setLabel(c).setStyle(ButtonStyle.Primary)));
+              const answerRow = new ActionRowBuilder<any>();
+              next.choices.forEach((c, i) => answerRow.addComponents(new ButtonBuilder().setCustomId(`quiz:answer:${encodeURIComponent(key)}:${i}`).setLabel(c).setStyle(ButtonStyle.Primary)));
+              // リタイヤボタンを追加
+              const quitRow = new ActionRowBuilder<any>().addComponents(
+                new ButtonBuilder().setCustomId(`quiz:quit:${encodeURIComponent(key)}`).setLabel('リタイヤ').setStyle(ButtonStyle.Danger)
+              );
               const { EmbedBuilder } = await import('discord.js');
               const eb2 = new EmbedBuilder().setTitle(`問題 ${s.current + 1}/${s.questions.length}`).setDescription(next.prompt).addFields({ name: '選択肢', value: next.choices.map((c, i) => `${i + 1}. ${c}`).join('\n') }).setFooter({ text: `暫定 正答: ${s.correct} | 経過: ${Math.round((s.times.reduce((a,b)=>a+b,0))/1000)}s` });
-              await interaction.update({ embeds: [eb2], components: [row] }).catch(() => {});
+              await interaction.update({ embeds: [eb2], components: [answerRow, quitRow] }).catch(() => {});
             }
             return;
           }

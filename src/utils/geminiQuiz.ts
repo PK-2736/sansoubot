@@ -80,17 +80,27 @@ export async function generateGeminiQuizQuestions(count: number = 7): Promise<Ge
       jsonText = jsonMatch[1];
     }
 
-    const questions: GeminiQuizQuestion[] = JSON.parse(jsonText);
+    let questions: GeminiQuizQuestion[] = JSON.parse(jsonText);
     
     // 選択肢の重複チェック：重複がある問題は除外
     const validQuestions = questions.filter((q, idx) => {
       const uniqueOptions = new Set(q.options);
       if (uniqueOptions.size !== q.options.length) {
-        log(`[GeminiQuiz] Skipping question ${idx + 1} due to duplicate options: ${q.question}`);
+        log(`[GeminiQuiz] Skipping question ${idx + 1} due to duplicate options: ${JSON.stringify(q.options)}`);
+        return false;
+      }
+      // 追加チェック：answerが選択肢に含まれているか
+      if (!q.options.includes(q.answer)) {
+        log(`[GeminiQuiz] Skipping question ${idx + 1}: answer not in options`);
         return false;
       }
       return true;
     });
+    
+    // 有効な問題が要求数に満たない場合は警告
+    if (validQuestions.length < count) {
+      log(`[GeminiQuiz] Warning: Only ${validQuestions.length}/${count} valid questions generated`);
+    }
     
     log(`[GeminiQuiz] Successfully generated ${validQuestions.length}/${questions.length} valid questions`);
 

@@ -18,7 +18,7 @@ export default {
         .setFooter({ text: 'Powered by Mountix & Gemini AI' });
       const startButton = new ButtonBuilder().setCustomId('quiz:start').setLabel('開始').setStyle(ButtonStyle.Success);
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(startButton);
-      await safeReply(interaction, { embeds: [eb], components: [row] });
+      await safeReply(interaction, { embeds: [eb], components: [row], flags: (await import('../../utils/flags')).EPHEMERAL });
     } catch (e: any) {
       log('quiz_start error', String(e?.message ?? e));
   try { await interaction.reply({ content: 'クイズの作成に失敗しました。', flags: (await import('../../utils/flags')).EPHEMERAL }); } catch (_) {}

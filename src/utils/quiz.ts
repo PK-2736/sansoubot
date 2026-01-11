@@ -100,59 +100,37 @@ async function buildMountixQuiz(): Promise<QuizQuestion[]> {
 }
 
 /**
- * Geminiクイズを7問取得または生成
+ * Geminiクイズを7問生成（毎回新規生成）
  */
 async function buildGeminiQuiz(): Promise<QuizQuestion[]> {
   const questions: QuizQuestion[] = [];
   
   try {
-    // まずDBから既存のGeminiクイズを取得
-    const existingQuizzes = await getGeminiQuizQuestions(7);
-    log(`[QuizBuilder] Found ${existingQuizzes.length} existing Gemini quizzes in DB`);
+    // 毎回新規生成（キャッシュを使わない）
+    log(`[QuizBuilder] Generating 7 new Gemini quizzes...`);
+    const newQuizzes = await generateGeminiQuizQuestions(7);
     
-    // 不足分のみGemini APIで生成
-    const needed = 7 - existingQuizzes.length;
-    
-    if (needed > 0) {
-      log(`[QuizBuilder] Generating ${needed} new Gemini quizzes...`);
-      const newQuizzes = await generateGeminiQuizQuestions(needed);
-      
-      // 新規生成したクイズをDBに保存
-      if (newQuizzes.length > 0) {
-        await saveGeminiQuizQuestions(newQuizzes);
-      }
-      
-      // 新規生成分を形式変換して追加
-      for (const q of newQuizzes) {
-        const answerIndex = q.options.indexOf(q.answer);
-        if (answerIndex === -1) continue; // 答えが選択肢にない場合はスキップ
-        
-        questions.push({
-          id: `gemini_${Date.now()}_${Math.random()}`,
-          type: 'gemini',
-          prompt: q.question,
-          choices: q.options,
-          answerIndex,
-          meta: { source: 'gemini' },
-          answerText: q.answer,
-        });
-      }
+    // 新規生成したクイズをDBに保存（履歴として）
+    if (newQuizzes.length > 0) {
+      await saveGeminiQuizQuestions(newQuizzes);
     }
     
-    // 既存のクイズを形式変換して追加
-    for (const dbQuiz of existingQuizzes) {
-      const options = JSON.parse(dbQuiz.options);
-      const answerIndex = options.indexOf(dbQuiz.answer);
-      if (answerIndex === -1) continue;
+    // 新規生成分を形式変換して追加
+    for (const q of newQuizzes) {
+      const answerIndex = q.options.indexOf(q.answer);
+      if (answerIndex === -1) {
+        log(`[QuizBuilder] Skipping quiz: answer not found in options`);
+        continue;
+      }
       
       questions.push({
-        id: `gemini_db_${dbQuiz.id}`,
+        id: `gemini_${Date.now()}_${Math.random()}`,
         type: 'gemini',
-        prompt: dbQuiz.question,
-        choices: options,
+        prompt: q.question,
+        choices: q.options,
         answerIndex,
-        meta: { source: 'gemini', dbId: dbQuiz.id },
-        answerText: dbQuiz.answer,
+        meta: { source: 'gemini' },
+        answerText: q.answer,
       });
     }
     
