@@ -25,13 +25,15 @@ export async function generateGeminiQuizQuestions(count: number = 7): Promise<Ge
     // Gemini 2.5 Flash (無料枠で利用可能)
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-    const prompt = `日本の登山に関する4択クイズを${count}問生成してください。
+    const prompt = `実践的な登山知識を問う4択クイズを${count}問生成してください。
 
 要件:
-- 日本の山、登山道具、登山マナー、高山植物、山岳地形などについての問題
+- 登山の安全、装備選択、気象判断、高山病対策、ルートファインディング、遭難対策など実践的な知識
+- 問題文は30文字以内、選択肢は15文字以内の簡潔な文にする
 - 各問題は4つの選択肢を持つ
 - 正解は選択肢の中の1つ
-- 初心者から中級者向けの難易度
+- 中級者から上級者向けの実用的で難易度の高い内容
+- 実際の登山で役立つ知識を重視
 - JSON配列形式で出力（他のテキストは含めない）
 
 出力形式:
@@ -46,9 +48,19 @@ export async function generateGeminiQuizQuestions(count: number = 7): Promise<Ge
 例:
 [
   {
-    "question": "日本三名山に含まれない山はどれ？",
-    "options": ["富士山", "立山", "白山", "槍ヶ岳"],
-    "answer": "槍ヶ岳"
+    "question": "雷雲接近時の最優先行動は？",
+    "options": ["即座に下山", "樹木の下へ", "岩陰に隠れる", "テント設営"],
+    "answer": "即座に下山"
+  },
+  {
+    "question": "高山病予防で最も重要なのは？",
+    "options": ["ゆっくり登る", "水分制限", "速く登る", "深呼吸しない"],
+    "answer": "ゆっくり登る"
+  },
+  {
+    "question": "森林限界を超える標高は？",
+    "options": ["2500m前後", "1000m前後", "3500m前後", "500m前後"],
+    "answer": "2500m前後"
   }
 ]`;
 

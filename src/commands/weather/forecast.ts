@@ -5,7 +5,8 @@ import { formatEmbed } from '../../utils/format';
 import { log } from '../../utils/logger';
 
 export default {
-  data: { name: 'weather_forecast' },
+  data: { name: 'weather_forecast', dmPermission: false },
+  hidden: true, // 未完成のため非表示
   async execute(interaction: ChatInputCommandInteraction) {
     const latInput = interaction.options?.getString && interaction.options.getString('lat') ? interaction.options.getString('lat')! : undefined;
     const lonInput = interaction.options?.getString && interaction.options.getString('lon') ? interaction.options.getString('lon')! : undefined;

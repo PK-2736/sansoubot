@@ -33,15 +33,16 @@ const commandsForRegistration = [
   // limit オプションは削除されました
     ],
   },
-  {
-    name: weatherForecast.data.name,
-    description: '山域の天気予報を表示',
-    options: [
-  { name: 'lat', description: '緯度（例: 35.68）', type: ApplicationCommandOptionType.String, required: false },
-  { name: 'lon', description: '経度（例: 139.76）', type: ApplicationCommandOptionType.String, required: false },
-  { name: 'mountain', description: '山名または Mountix ID（例: 富士山, 1234）', type: ApplicationCommandOptionType.String, required: false },
-    ],
-  },
+  // weather_forecast は未完成のため非表示
+  // {
+  //   name: weatherForecast.data.name,
+  //   description: '山域の天気予報を表示',
+  //   options: [
+  // { name: 'lat', description: '緯度（例: 35.68）', type: ApplicationCommandOptionType.String, required: false },
+  // { name: 'lon', description: '経度（例: 139.76）', type: ApplicationCommandOptionType.String, required: false },
+  // { name: 'mountain', description: '山名または Mountix ID（例: 富士山, 1234）', type: ApplicationCommandOptionType.String, required: false },
+  //   ],
+  // },
   {
     name: mapRoute.data.name,
     description: 'Static Mapなどでルート画像を生成',
