@@ -203,3 +203,44 @@ mountain-bot/
    - クイズはDBに保存されるため、同じ問題は再生成されません（効率的）
 
 ---
+
+## 🔒 データベース保護（本番環境）
+
+### OCIサーバー上でのデータ保護手順
+
+サーバー上の `prisma/dev.db` はユーザーデータを含む重要なファイルです。`git pull` で上書きされないよう、以下の手順を実行してください：
+
+```bash
+# 1. サーバーにSSH接続後、プロジェクトディレクトリへ移動
+cd ~/sansoubot
+
+# 2. データベースをバックアップ（念のため）
+cp prisma/dev.db prisma/dev.db.backup.$(date +%Y%m%d_%H%M%S)
+
+# 3. Git追跡からdev.dbを除外
+git rm --cached prisma/dev.db
+
+# 4. 変更をコミット
+git commit -m "Remove dev.db from git tracking"
+
+# 5. これで安全にpullできます
+git pull origin main
+```
+
+### 自動バックアップスクリプト
+
+定期的なバックアップには `backup-db.sh` スクリプトを使用してください：
+
+```bash
+# スクリプトを実行
+./backup-db.sh
+
+# cronで自動化する場合（毎日深夜2時に実行）
+crontab -e
+# 以下を追加
+0 2 * * * cd ~/sansoubot && ./backup-db.sh >> ~/sansoubot_backup.log 2>&1
+```
+
+バックアップは `~/sansoubot_backups/` に保存され、30日以上前のものは自動削除されます。
+
+---
