@@ -78,7 +78,37 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
     if (API_KEY) headers['Authorization'] = `Bearer ${API_KEY}`;
     const res = await axios.get(`${BASE}/mountains`, { params: params as any, headers, timeout: 8000 });
     const arr = Array.isArray(res.data) ? res.data : (res.data?.mountains ?? []);
-    const results = arr.map(normalizeMountain);
+    let results = arr.map(normalizeMountain);
+
+    // 内部DB（Prisma/SQLite）から承認済みのユーザー追加山を検索して結合
+    try {
+      if (params.name) {
+        const userMountsRaw = await prisma.userMountain.findMany({
+          where: { approved: true },
+          orderBy: { created_at: 'desc' },
+          take: params.limit ?? 200,
+        });
+        if (userMountsRaw && Array.isArray(userMountsRaw)) {
+          const q = normalizeForSearch(params.name);
+          const qvars = generateSearchVariants(q);
+          const userMounts = userMountsRaw
+            .filter(d => {
+              const n = normalizeForSearch(d.name ?? '');
+              const nvars = generateSearchVariants(n);
+              for (const qv of qvars) {
+                for (const nv of nvars) {
+                  if (nv.includes(qv) || qv.includes(nv)) return true;
+                }
+              }
+              return false;
+            })
+            .map(d => normalizeMountain({ id: `user-${d.id}`, name: d.name, elevation: d.elevation ?? undefined, location: d.location ? { raw: d.location } : undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, properties: {}, prefectures: [] }));
+          if (userMounts.length) results = userMounts.concat(results);
+        }
+      }
+    } catch (e) {
+      // ignore local-db errors
+    }
 
     // If caller provided a name, apply an additional client-side normalization filter
     // to increase hit-rate across kanji/kana variants regardless of upstream behavior.
@@ -107,26 +137,6 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
         // if normalization fails, fall back to raw results
         return results;
       }
-    }
-
-    // 内部DB（Prisma/SQLite）から承認済みのユーザー追加山を検索して結合
-    try {
-      if (params.name) {
-        const userMountsRaw = await prisma.userMountain.findMany({
-          where: { approved: true },
-          orderBy: { created_at: 'desc' },
-          take: params.limit ?? 200,
-        });
-        if (userMountsRaw && Array.isArray(userMountsRaw)) {
-          const q = String(params.name).toLowerCase();
-          const userMounts = userMountsRaw
-            .filter(d => String(d.name ?? '').toLowerCase().includes(q))
-            .map(d => normalizeMountain({ id: `user-${d.id}`, name: d.name, elevation: d.elevation ?? undefined, location: d.location ? { raw: d.location } : undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, properties: {}, prefectures: [] }));
-          if (userMounts.length) return userMounts.concat(results);
-        }
-      }
-    } catch (e) {
-      // ignore local-db errors
     }
 
     return results;

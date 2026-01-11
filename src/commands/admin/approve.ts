@@ -133,12 +133,11 @@ export default {
             
             selectCollector?.on('collect', async (selectInteraction: any) => {
               try {
-                await selectInteraction.deferUpdate();
                 const mountainId = selectInteraction.values[0];
                 const mountain = pending.find((m: any) => m.id === mountainId);
                 
                 if (!mountain) {
-                  await selectInteraction.reply({ content: '山が見つかりません。', ephemeral: true });
+                  await selectInteraction.reply({ content: '山が見つかりません。', flags: (await import('discord.js')).MessageFlags.Ephemeral });
                   return;
                 }
 
