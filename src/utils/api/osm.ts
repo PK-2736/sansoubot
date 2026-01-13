@@ -48,16 +48,17 @@ export async function searchMountainsOSM(
     console.log(`[OSM] bbox: ${searchBbox.join(',')}`);
 
     // Overpass QLクエリを構築
-    // natural=peak（山頂）を検索
+    // 日本語のクエリに対応するため、クエリ部分は広めに取得してから後でフィルタ
+    // まずは全ての山を取得する方式に変更（name存在チェックのみ）
     const overpassQuery = `
 [out:json][timeout:25];
 (
-  node["natural"="peak"]["name"~"${query}",i](${searchBbox.join(',')});
-  node["natural"="volcano"]["name"~"${query}",i](${searchBbox.join(',')});
-  way["natural"="peak"]["name"~"${query}",i](${searchBbox.join(',')});
-  way["natural"="volcano"]["name"~"${query}",i](${searchBbox.join(',')});
+  node["natural"="peak"]["name"](${searchBbox.join(',')});
+  node["natural"="volcano"]["name"](${searchBbox.join(',')});
+  way["natural"="peak"]["name"](${searchBbox.join(',')});
+  way["natural"="volcano"]["name"](${searchBbox.join(',')});
 );
-out body ${limit};
+out body 500;
 >;
 out skel qt;
     `.trim();
@@ -83,8 +84,10 @@ out skel qt;
       return [];
     }
 
+    console.log(`[OSM] Parsing ${response.data.elements.length} elements...`);
+    
     // 結果をパース
-    const mountains: OSMMountain[] = response.data.elements
+    const allParsed = response.data.elements
       .filter((el: any) => el.tags?.name)
       .map((element: any) => {
         const tags = element.tags || {};
@@ -103,25 +106,42 @@ out skel qt;
           osmType: element.type as 'node' | 'way' | 'relation',
           osmId: element.id
         };
-      })
-      .filter((m: OSMMountain) => {
-        // クエリとマッチする結果のみを返す
-        const name = normalizeForSearch(m.name);
-        const nameKana = normalizeForSearch(m.nameKana || '');
-        const nameVariants = [...generateSearchVariants(name), ...generateSearchVariants(nameKana)];
-        
-        return variants.some(qv => 
-          nameVariants.some(nv => nv.includes(qv) || qv.includes(nv))
-        );
       });
+
+    console.log(`[OSM] Parsed ${allParsed.length} mountains with names`);
+    if (allParsed.length > 0) {
+      console.log(`[OSM] Sample names: ${allParsed.slice(0, 5).map((m: OSMMountain) => m.name).join(', ')}`);
+    }
+    
+    // クエリとマッチする結果のみを返す
+    console.log(`[OSM] Filtering by query variants...`);
+    const mountains = allParsed.filter((m: OSMMountain) => {
+      const name = normalizeForSearch(m.name);
+      const nameKana = normalizeForSearch(m.nameKana || '');
+      const nameVariants = [...generateSearchVariants(name), ...generateSearchVariants(nameKana)];
+      
+      const matches = variants.some(qv => 
+        nameVariants.some(nv => nv.includes(qv) || qv.includes(nv))
+      );
+      
+      if (matches && mountains.length < 3) {
+        console.log(`[OSM] MATCH: "${m.name}" matched query "${query}"`);
+      }
+      
+      return matches;
+    });
 
     console.log(`[OSM] After filtering: ${mountains.length} mountains`);
     if (mountains.length > 0) {
       console.log(`[OSM] First result: ${mountains[0].name} (elevation: ${mountains[0].elevation}m)`);
     }
+    
+    // Limit the results
+    const limitedResults = mountains.slice(0, limit);
+    console.log(`[OSM] Returning ${limitedResults.length} results (limited from ${mountains.length})`);
     console.log(`[OSM] ==========`);
 
-    return mountains;
+    return limitedResults;
   } catch (error: any) {
     console.error('[OSM] ERROR occurred:');
     console.error('[OSM] Error message:', error?.message || 'Unknown error');
