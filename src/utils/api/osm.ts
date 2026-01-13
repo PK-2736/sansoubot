@@ -144,6 +144,7 @@ out body 50;
     
     // クエリとマッチする結果のみを返す
     console.log(`[OSM] Filtering by query variants...`);
+    let matchCount = 0;
     const mountains = allMountains.filter((m: OSMMountain) => {
       const name = normalizeForSearch(m.name);
       const nameKana = normalizeForSearch(m.nameKana || '');
@@ -153,8 +154,9 @@ out body 50;
         nameVariants.some(nv => nv.includes(qv) || qv.includes(nv))
       );
       
-      if (matches && mountains.length < 3) {
+      if (matches && matchCount < 3) {
         console.log(`[OSM] MATCH: "${m.name}" matched query "${query}"`);
+        matchCount++;
       }
       
       return matches;
