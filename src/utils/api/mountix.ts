@@ -73,12 +73,16 @@ export type SearchParams = {
 
 export async function searchMountains(params: SearchParams = {}): Promise<Mountain[]> {
   let allResults: Mountain[] = [];
+  
+  // 件数制限（最大200件）
+  const maxLimit = 200;
+  const searchLimit = Math.min(params.limit || 50, maxLimit);
 
   // 1. OpenStreetMap（OSM）から検索
   if (params.name) {
-    console.log(`[searchMountains] Searching OSM for: "${params.name}"`);
+    console.log(`[searchMountains] Searching OSM for: "${params.name}" (limit: ${searchLimit})`);
     try {
-      const osmResults = await searchMountainsOSM(params.name, undefined, params.limit || 50);
+      const osmResults = await searchMountainsOSM(params.name, undefined, searchLimit);
       console.log(`[searchMountains] OSM returned ${osmResults.length} results`);
       const osmMountains = osmResults.map(osm => normalizeMountain({
         id: osm.id,

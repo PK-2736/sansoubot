@@ -4,6 +4,14 @@ import { normalizeForSearch, generateSearchVariants } from '../string';
 // OpenStreetMap Overpass API
 const OVERPASS_API = 'https://overpass-api.de/api/interpreter';
 
+// 簡易キャッシュ（メモリ内、5分間有効）
+interface CacheEntry {
+  data: OSMMountain[];
+  timestamp: number;
+}
+const searchCache = new Map<string, CacheEntry>();
+const CACHE_TTL = 5 * 60 * 1000; // 5分
+
 export interface OSMMountain {
   id: string | number;
   name: string;
@@ -33,6 +41,18 @@ export async function searchMountainsOSM(
   console.log(`[OSM] query: "${query}"`);
   console.log(`[OSM] limit: ${limit}`);
   
+  // キャッシュキーを生成
+  const cacheKey = `${query}:${bbox?.join(',') || 'default'}:${limit}`;
+  
+  // キャッシュチェック
+  const cached = searchCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+    console.log(`[OSM] Cache HIT for "${query}" (${cached.data.length} results)`);
+    return cached.data;
+  }
+  
+  console.log(`[OSM] Cache MISS for "${query}", fetching from API...`);
+  
   try {
     // 検索クエリを正規化
     const normalizedQuery = normalizeForSearch(query);
@@ -48,15 +68,29 @@ export async function searchMountainsOSM(
     console.log(`[OSM] bbox: ${searchBbox.join(',')}`);
 
     // Overpass QLクエリを構築
-    // 日本全体の山は多すぎるため、クエリ文字列で絞り込む
-    // Overpass APIは正規表現よりも部分一致の方が速い
+    // 効率化のため、bbox + 名前フィルタを使用
+    // 日本を6つのエリアに分割して検索
+    const regions = [
+      [35, 138, 36.5, 140.5],  // 関東・中部
+      [33.5, 130, 35, 136],    // 近畿・中国  
+      [41, 140, 45.5, 146],    // 北海道
+      [38, 139, 41, 142],      // 東北
+      [31, 129, 33.5, 132],    // 九州
+      [24, 123, 27, 129]       // 沖縄
+    ];
+    
+    // クエリを短縮して効率化
+    const queries = regions.map(r => 
+      `node["natural"="peak"]["name"~"${query}",i](${r.join(',')});
+       node["natural"="volcano"]["name"~"${query}",i](${r.join(',')});`
+    ).join('\n  ');
+    
     const overpassQuery = `
 [out:json][timeout:60];
 (
-  node["natural"="peak"]["name"~".*",i](${searchBbox.join(',')});
-  node["natural"="volcano"]["name"~".*",i](${searchBbox.join(',')});
+  ${queries}
 );
-out body 1000;
+out body ${Math.min(limit, 100)};
     `.trim();
 
     console.log(`[OSM] Sending request to ${OVERPASS_API}`);
@@ -135,6 +169,13 @@ out body 1000;
     // Limit the results
     const limitedResults = mountains.slice(0, limit);
     console.log(`[OSM] Returning ${limitedResults.length} results (limited from ${mountains.length})`);
+    
+    // キャッシュに保存
+    searchCache.set(cacheKey, {
+      data: limitedResults,
+      timestamp: Date.now()
+    });
+    console.log(`[OSM] Cached results for "${query}"`);
     console.log(`[OSM] ==========`);
 
     return limitedResults;

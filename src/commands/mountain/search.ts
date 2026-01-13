@@ -43,6 +43,14 @@ export default {
   const idOption = interaction.options?.getString && interaction.options.getString('id') ? interaction.options.getString('id')! : undefined;
 
     try {
+      // 1文字検索禁止
+      if (nameOption && nameOption.length < 2) {
+        await safeReply(interaction, { 
+          content: '❌ 検索クエリは2文字以上で入力してください。', 
+          flags: (await import('../../utils/flags')).EPHEMERAL 
+        });
+        return;
+      }
       // id オプションが指定された場合、詳細な山情報を表示します（mountain_info の機能を統合）
       if (idOption) {
         const id = idOption;
