@@ -48,19 +48,15 @@ export async function searchMountainsOSM(
     console.log(`[OSM] bbox: ${searchBbox.join(',')}`);
 
     // Overpass QLクエリを構築
-    // 日本語のクエリに対応するため、クエリ部分は広めに取得してから後でフィルタ
-    // まずは全ての山を取得する方式に変更（name存在チェックのみ）
+    // 日本全体の山は多すぎるため、クエリ文字列で絞り込む
+    // Overpass APIは正規表現よりも部分一致の方が速い
     const overpassQuery = `
-[out:json][timeout:25];
+[out:json][timeout:60];
 (
-  node["natural"="peak"]["name"](${searchBbox.join(',')});
-  node["natural"="volcano"]["name"](${searchBbox.join(',')});
-  way["natural"="peak"]["name"](${searchBbox.join(',')});
-  way["natural"="volcano"]["name"](${searchBbox.join(',')});
+  node["natural"="peak"]["name"~".*",i](${searchBbox.join(',')});
+  node["natural"="volcano"]["name"~".*",i](${searchBbox.join(',')});
 );
-out body 500;
->;
-out skel qt;
+out body 1000;
     `.trim();
 
     console.log(`[OSM] Sending request to ${OVERPASS_API}`);
@@ -71,7 +67,7 @@ out skel qt;
       overpassQuery,
       {
         headers: { 'Content-Type': 'text/plain' },
-        timeout: 30000
+        timeout: 65000  // 65秒（Overpassのタイムアウト60秒より少し長め）
       }
     );
 

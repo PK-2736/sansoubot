@@ -100,22 +100,7 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
     console.log('[searchMountains] Skipping OSM search (no name parameter)');
   }
 
-  // 2. Mountix APIから検索（オプション - バックアップとして）
-  try {
-    console.log('[searchMountains] Searching Mountix API');
-    const headers: Record<string, string> = {};
-    if (API_KEY) headers['Authorization'] = `Bearer ${API_KEY}`;
-    const res = await axios.get(`${BASE}/mountains`, { params: params as any, headers, timeout: 8000 });
-    const arr = Array.isArray(res.data) ? res.data : (res.data?.mountains ?? []);
-    const mountixResults = arr.map(normalizeMountain);
-    allResults = allResults.concat(mountixResults);
-    console.log(`[searchMountains] Added ${mountixResults.length} Mountix mountains to results`);
-  } catch (err: any) {
-    console.error('[searchMountains] Mountix API failed:', err.message);
-    // Mountixが失敗してもOSM結果があれば続行
-  }
-
-  // 3. 内部DB（Prisma/SQLite）から承認済みのユーザー追加山を検索して結合
+  // 2. 内部DB（Prisma/SQLite）から承認済みのユーザー追加山を検索して結合
   try {
     if (params.name) {
       const userMountsRaw = await prisma.userMountain.findMany({
