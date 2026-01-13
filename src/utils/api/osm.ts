@@ -68,84 +68,83 @@ export async function searchMountainsOSM(
     console.log(`[OSM] bbox: ${searchBbox.join(',')}`);
 
     // Overpass QLクエリを構築
-    // 効率化のため、bbox + 名前フィルタを使用
-    // 日本を6つのエリアに分割して検索
+    // 効率化のため、優先度順に地域を検索（人口密度が高く有名な山が多い順）
     const regions = [
-      [35, 138, 36.5, 140.5],  // 関東・中部
-      [33.5, 130, 35, 136],    // 近畿・中国  
-      [41, 140, 45.5, 146],    // 北海道
-      [38, 139, 41, 142],      // 東北
-      [31, 129, 33.5, 132],    // 九州
-      [24, 123, 27, 129]       // 沖縄
+      { name: '関東・中部', bbox: [35, 138, 36.5, 140.5] },
+      { name: '近畿・中国・四国', bbox: [33.5, 130, 35, 136] },
+      { name: '東北', bbox: [38, 139, 41, 142] },
+      { name: '九州', bbox: [31, 129, 33.5, 132] },
+      { name: '北海道', bbox: [41, 140, 45.5, 146] },
+      { name: '沖縄', bbox: [24, 123, 27, 129] }
     ];
     
-    // クエリを短縮して効率化
-    const queries = regions.map(r => 
-      `node["natural"="peak"]["name"~"${query}",i](${r.join(',')});
-       node["natural"="volcano"]["name"~"${query}",i](${r.join(',')});`
-    ).join('\n  ');
+    const allMountains: OSMMountain[] = [];
     
-    const overpassQuery = `
-[out:json][timeout:60];
-(
-  ${queries}
-);
-out body ${Math.min(limit, 100)};
-    `.trim();
-
-    console.log(`[OSM] Sending request to ${OVERPASS_API}`);
-    console.log(`[OSM] Query preview: ${overpassQuery.substring(0, 150)}...`);
-
-    const response = await axios.post(
-      OVERPASS_API,
-      overpassQuery,
-      {
-        headers: { 'Content-Type': 'text/plain' },
-        timeout: 65000  // 65秒（Overpassのタイムアウト60秒より少し長め）
+    // 各地域を順番に検索（十分な結果が得られたら終了）
+    for (const region of regions) {
+      if (allMountains.length >= limit) {
+        console.log(`[OSM] Already have ${allMountains.length} results, skipping remaining regions`);
+        break;
       }
-    );
+      
+      const bbox = region.bbox;
+      const overpassQuery = `
+[out:json][timeout:30];
+(
+  node["natural"="peak"]["name"~"${query}",i](${bbox.join(',')});
+  node["natural"="volcano"]["name"~"${query}",i](${bbox.join(',')});
+);
+out body 50;
+      `.trim();
 
-    console.log(`[OSM] Response received`);
-    console.log(`[OSM] Status: ${response.status}`);
-    console.log(`[OSM] Elements count: ${response.data?.elements?.length || 0}`);
+      console.log(`[OSM] Searching in ${region.name}...`);
+      
+      try {
+        const response = await axios.post(
+          OVERPASS_API,
+          overpassQuery,
+          {
+            headers: { 'Content-Type': 'text/plain' },
+            timeout: 35000  // 35秒
+          }
+        );
 
-    if (!response.data?.elements) {
-      console.log('[OSM] No elements in response, returning empty array');
-      return [];
+        if (response.data?.elements && Array.isArray(response.data.elements)) {
+          const parsed = response.data.elements
+            .filter((el: any) => el.tags?.name)
+            .map((element: any) => {
+              const tags = element.tags || {};
+              const lat = element.lat || element.center?.lat;
+              const lon = element.lon || element.center?.lon;
+
+              return {
+                id: `osm-${element.type}-${element.id}`,
+                name: tags.name || '不明',
+                nameKana: tags['name:ja-Hira'] || tags['name:ja_kana'] || undefined,
+                elevation: tags.ele ? parseFloat(tags.ele) : undefined,
+                coords: (lat && lon) ? [lat, lon] as [number, number] : undefined,
+                description: tags.description || tags.note || undefined,
+                prefectures: [],
+                source: 'OSM' as const,
+                osmType: element.type as 'node' | 'way' | 'relation',
+                osmId: element.id
+              };
+            });
+          
+          console.log(`[OSM] Found ${parsed.length} mountains in ${region.name}`);
+          allMountains.push(...parsed);
+        }
+      } catch (regionError: any) {
+        console.log(`[OSM] Error in ${region.name}: ${regionError?.message}, continuing to next region...`);
+        continue;
+      }
     }
 
-    console.log(`[OSM] Parsing ${response.data.elements.length} elements...`);
-    
-    // 結果をパース
-    const allParsed = response.data.elements
-      .filter((el: any) => el.tags?.name)
-      .map((element: any) => {
-        const tags = element.tags || {};
-        const lat = element.lat || element.center?.lat;
-        const lon = element.lon || element.center?.lon;
-
-        return {
-          id: `osm-${element.type}-${element.id}`,
-          name: tags.name || '不明',
-          nameKana: tags['name:ja-Hira'] || tags['name:ja_kana'] || undefined,
-          elevation: tags.ele ? parseFloat(tags.ele) : undefined,
-          coords: (lat && lon) ? [lat, lon] as [number, number] : undefined,
-          description: tags.description || tags.note || undefined,
-          prefectures: [], // OSMから都道府県を取得するには追加のジオコーディングが必要
-          source: 'OSM' as const,
-          osmType: element.type as 'node' | 'way' | 'relation',
-          osmId: element.id
-        };
-      });
-
-    console.log(`[OSM] Parsed ${allParsed.length} mountains with names`);
-    if (allParsed.length > 0) {
-      console.log(`[OSM] Sample names: ${allParsed.slice(0, 5).map((m: OSMMountain) => m.name).join(', ')}`);
-    }
+    console.log(`[OSM] Total parsed: ${allMountains.length} mountains from all regions`);
     
     // クエリとマッチする結果のみを返す
     console.log(`[OSM] Filtering by query variants...`);
-    const mountains = allParsed.filter((m: OSMMountain) => {
+    const mountains = allMountains.filter((m: OSMMountain) => {
       const name = normalizeForSearch(m.name);
       const nameKana = normalizeForSearch(m.nameKana || '');
       const nameVariants = [...generateSearchVariants(name), ...generateSearchVariants(nameKana)];
