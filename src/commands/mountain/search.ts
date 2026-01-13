@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } from 'discord.js';
 import { searchMountains, BASE as MOUNTIX_BASE, getMountain } from '../../utils/api/mountix';
+import { getOSMLicenseText, getOSMLicenseLink } from '../../utils/api/osm';
 import { formatEmbed } from '../../utils/format';
 import { log } from '../../utils/logger';
 import fetchWikipediaImage, { fetchWikipediaSummary } from '../../utils/api/wiki';
@@ -42,21 +43,25 @@ export default {
   const idOption = interaction.options?.getString && interaction.options.getString('id') ? interaction.options.getString('id')! : undefined;
 
     try {
-  // id オプションが指定された場合、詳細な山情報を表示します（mountain_info の機能を統合）
+      // id オプションが指定された場合、詳細な山情報を表示します（mountain_info の機能を統合）
       if (idOption) {
         const id = idOption;
-  // 1) まず Mountix を試します
+        // 1) まず Mountix を試します
         let m: any = null;
         let source = 'Mountix';
         try {
           m = await getMountain(id);
+          // getMountainで取得したpropertiesからsourceを確認
+          if (m && (m as any).properties?.source) {
+            source = (m as any).properties.source;
+          }
         } catch (_) {
           m = null;
         }
 
         let addedBy: string | undefined = undefined;
         let addedByName: string | undefined = undefined;
-  // 2) 次に内部DBの user_mountains を確認します
+        // 2) 次に内部DBの user_mountains を確認します
         if (!m) {
           const qid = String(id).replace(/^user-/, '');
           const byId = await prisma.userMountain.findUnique({ where: { id: qid } }).catch(() => null);
@@ -105,10 +110,14 @@ export default {
         ];
 
         const sourceLinks: string[] = [];
-        if (source === 'Mountix' && m.id) {
+        if (source === 'OSM') {
+          const osmLicense = getOSMLicenseText();
+          const osmLink = getOSMLicenseLink();
+          sourceLinks.push(osmLicense);
+          sourceLinks.push(`<${osmLink}>`);
+        } else if (source === 'Mountix' && m.id) {
           sourceLinks.push(`<${MOUNTIX_BASE}/mountains/${encodeURIComponent(String(m.id))}>`);
-        }
-        if (source === 'Local' && m.id) {
+        } else if (source === 'Local' && m.id) {
           const rid = String(m.id).replace(/^user-/, '');
           sourceLinks.push(`Local record ID: ${rid}`);
         }
@@ -212,7 +221,16 @@ export default {
 
     // 出典を判定: 内部DBのユーザー追加レコードは id に 'user-' プレフィックスを付与しています
     const rid = String(r.id ?? '');
-    if (rid.startsWith('user-')) {
+    const rProps = (r as any).properties || {};
+    const rSource = rProps.source;
+    
+    if (rSource === 'OSM') {
+      sources.push('OpenStreetMap');
+      const osmLicense = getOSMLicenseText();
+      const osmLink = getOSMLicenseLink();
+      sourceLinks.push(`${osmLicense}\n<${osmLink}>`);
+      addedBys.push(undefined);
+    } else if (rid.startsWith('user-')) {
       sources.push('Local');
       const uid = rid.replace(/^user-/, '');
       // 内部DBから追加者情報を取得

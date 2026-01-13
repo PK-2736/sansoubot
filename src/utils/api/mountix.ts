@@ -2,6 +2,7 @@ import axios from 'axios';
 import prefecturesData from './prefectures.json';
 import { prisma } from '../../utils/db';
 import { normalizeForSearch, generateSearchVariants } from '../string';
+import { searchMountainsOSM, OSMMountain, getOSMLicenseText } from './osm';
 
 export const BASE = process.env.MOUNTIX_API_BASE || 'https://mountix.codemountains.org/api/v1';
 const API_KEY = process.env.MOUNTIX_API_KEY || '';
@@ -71,105 +72,112 @@ export type SearchParams = {
 };
 
 export async function searchMountains(params: SearchParams = {}): Promise<Mountain[]> {
+  let allResults: Mountain[] = [];
+
+  // 1. OpenStreetMap（OSM）から検索
+  if (params.name) {
+    try {
+      const osmResults = await searchMountainsOSM(params.name, undefined, params.limit || 50);
+      const osmMountains = osmResults.map(osm => normalizeMountain({
+        id: osm.id,
+        name: osm.name,
+        nameKana: osm.nameKana,
+        elevation: osm.elevation,
+        latitude: osm.coords?.[0],
+        longitude: osm.coords?.[1],
+        description: osm.description,
+        prefectures: osm.prefectures,
+        properties: { source: 'OSM', osmType: osm.osmType, osmId: osm.osmId }
+      }));
+      allResults = allResults.concat(osmMountains);
+    } catch (e) {
+      console.error('[searchMountains] OSM search failed:', e);
+    }
+  }
+
+  // 2. Mountix APIから検索（オプション - バックアップとして）
   try {
     const headers: Record<string, string> = {};
-    // Mountix は公開 API のため通常は API_KEY は不要です。
-    // ただし将来的に認証が必要になる可能性があるため、環境変数が設定されていれば Authorization ヘッダを付与します。
     if (API_KEY) headers['Authorization'] = `Bearer ${API_KEY}`;
     const res = await axios.get(`${BASE}/mountains`, { params: params as any, headers, timeout: 8000 });
     const arr = Array.isArray(res.data) ? res.data : (res.data?.mountains ?? []);
-    let results = arr.map(normalizeMountain);
+    const mountixResults = arr.map(normalizeMountain);
+    allResults = allResults.concat(mountixResults);
+  } catch (err: any) {
+    console.error('[searchMountains] Mountix API failed:', err.message);
+    // Mountixが失敗してもOSM結果があれば続行
+  }
 
-    // 内部DB（Prisma/SQLite）から承認済みのユーザー追加山を検索して結合
-    try {
-      if (params.name) {
-        const userMountsRaw = await prisma.userMountain.findMany({
-          where: { approved: true },
-          orderBy: { created_at: 'desc' },
-          take: params.limit ?? 200,
-        });
-        if (userMountsRaw && Array.isArray(userMountsRaw)) {
-          const q = normalizeForSearch(params.name);
-          const qvars = generateSearchVariants(q);
-          const userMounts = userMountsRaw
-            .filter(d => {
-              const n = normalizeForSearch(d.name ?? '');
-              const nKana = normalizeForSearch(d.nameKana ?? '');
-              const nvars = [...generateSearchVariants(n), ...generateSearchVariants(nKana)];
-              for (const qv of qvars) {
-                for (const nv of nvars) {
-                  if (nv.includes(qv) || qv.includes(nv)) return true;
-                }
-              }
-              return false;
-            })
-            .map(d => normalizeMountain({ id: `user-${d.id}`, name: d.name, nameKana: d.nameKana ?? undefined, elevation: d.elevation ?? undefined, location: d.location ? { raw: d.location } : undefined, description: d.description ?? undefined, photo_url: d.photo_url ?? undefined, properties: {}, prefectures: [] }));
-          if (userMounts.length) results = userMounts.concat(results);
-        }
-      }
-    } catch (e) {
-      // ignore local-db errors
-    }
-
-    // If caller provided a name, apply an additional client-side normalization filter
-    // to increase hit-rate across kanji/kana variants regardless of upstream behavior.
+  // 3. 内部DB（Prisma/SQLite）から承認済みのユーザー追加山を検索して結合
+  try {
     if (params.name) {
-      try {
+      const userMountsRaw = await prisma.userMountain.findMany({
+        where: { approved: true },
+        orderBy: { created_at: 'desc' },
+        take: params.limit ?? 200,
+      });
+      if (userMountsRaw && Array.isArray(userMountsRaw)) {
         const q = normalizeForSearch(params.name);
         const qvars = generateSearchVariants(q);
-  const filtered = results.filter((m: Mountain) => {
-          const n1 = normalizeForSearch(m.name ?? '');
-          const n2 = normalizeForSearch(m.nameKana ?? '');
+        const userMounts = userMountsRaw
+          .filter(d => {
+            const n = normalizeForSearch(d.name ?? '');
+            const nKana = normalizeForSearch(d.nameKana ?? '');
+            const nvars = [...generateSearchVariants(n), ...generateSearchVariants(nKana)];
+            for (const qv of qvars) {
+              for (const nv of nvars) {
+                if (nv.includes(qv) || qv.includes(nv)) return true;
+              }
+            }
+            return false;
+          })
+          .map(d => normalizeMountain({ 
+            id: `user-${d.id}`, 
+            name: d.name, 
+            nameKana: d.nameKana ?? undefined, 
+            elevation: d.elevation ?? undefined, 
+            location: d.location ? { raw: d.location } : undefined, 
+            description: d.description ?? undefined, 
+            photo_url: d.photo_url ?? undefined, 
+            properties: { source: 'Local' }, 
+            prefectures: [] 
+          }));
+        if (userMounts.length) allResults = userMounts.concat(allResults);
+      }
+    }
+  } catch (e) {
+    // ignore local-db errors
+  }
+
+  // If caller provided a name, apply an additional client-side normalization filter
+  // to increase hit-rate across kanji/kana variants regardless of upstream behavior.
+  if (params.name) {
+    try {
+      const q = normalizeForSearch(params.name);
+      const qvars = generateSearchVariants(q);
+      const filtered = allResults.filter((m: Mountain) => {
+        const n1 = normalizeForSearch(m.name ?? '');
+        const n2 = normalizeForSearch(m.nameKana ?? '');
           const variants = new Set<string>([n1, n2, n1.replace(/\s+/g,''), n2.replace(/\s+/g,'')]);
           // also add kana<->hira variants of the stored names
           generateSearchVariants(n1).forEach(v => variants.add(v));
           generateSearchVariants(n2).forEach(v => variants.add(v));
-          // check if any query variant is substring of any stored variant
-          for (const qv of qvars) {
-            for (const sv of variants) {
-              if (!sv) continue;
-              if (sv.includes(qv) || qv.includes(sv)) return true;
-            }
+        // check if any query variant is substring of any stored variant
+        for (const qv of qvars) {
+          for (const sv of variants) {
+            if (!sv) continue;
+            if (sv.includes(qv) || qv.includes(sv)) return true;
           }
-          return false;
-        });
-        return filtered;
-      } catch (e) {
-        // if normalization fails, fall back to raw results
-        return results;
-      }
+        }
+        return false;
+      });
+      allResults = filtered;
+    } catch (e) {
+      // if normalization fails, fall back to raw results
     }
-
-    return results;
-  } catch (err: any) {
-    // フォールバック: sampleMountains でフィルタ
-    const qTag = params.tag ? String(params.tag) : undefined;
-    const qPref = params.prefecture ? String(params.prefecture) : undefined;
-    const qName = params.name ? String(params.name).toLowerCase() : undefined;
-
-    let results = sampleMountains.slice();
-
-    if (qTag) {
-      const tagName = qTag === '1' ? '百名山' : qTag === '2' ? '二百名山' : undefined;
-      if (tagName) results = results.filter(m => Array.isArray(m.tags) && m.tags.includes(tagName));
-    }
-
-    if (qPref) {
-      // qPref が数値なら prefecturesData を使って県名に変換
-      const pName = String(qPref);
-  const maybeName = /^\\d+$/.test(pName) ? ((prefecturesData as any)[pName] as string | undefined) : undefined;
-      const matchName = maybeName ?? pName;
-      results = results.filter(m => Array.isArray(m.prefectures) && m.prefectures.some((p: string) => p.includes(matchName) || matchName.includes(p)));
-    }
-
-    if (qName) {
-      results = results.filter(m => (m.name && m.name.toLowerCase().includes(qName)) || (m.nameKana && m.nameKana.includes(qName)));
-    }
-
-    const off = params.offset ?? 0;
-    const lim = params.limit ?? 50;
-    return results.slice(off, off + lim).map(normalizeMountain);
   }
+
+  return allResults;
 }
 
 export async function getMountain(id: string | number): Promise<Mountain> {
