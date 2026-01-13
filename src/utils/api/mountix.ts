@@ -76,8 +76,10 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
 
   // 1. OpenStreetMap（OSM）から検索
   if (params.name) {
+    console.log(`[searchMountains] Searching OSM for: "${params.name}"`);
     try {
       const osmResults = await searchMountainsOSM(params.name, undefined, params.limit || 50);
+      console.log(`[searchMountains] OSM returned ${osmResults.length} results`);
       const osmMountains = osmResults.map(osm => normalizeMountain({
         id: osm.id,
         name: osm.name,
@@ -90,19 +92,24 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
         properties: { source: 'OSM', osmType: osm.osmType, osmId: osm.osmId }
       }));
       allResults = allResults.concat(osmMountains);
+      console.log(`[searchMountains] Added ${osmMountains.length} OSM mountains to results`);
     } catch (e) {
       console.error('[searchMountains] OSM search failed:', e);
     }
+  } else {
+    console.log('[searchMountains] Skipping OSM search (no name parameter)');
   }
 
   // 2. Mountix APIから検索（オプション - バックアップとして）
   try {
+    console.log('[searchMountains] Searching Mountix API');
     const headers: Record<string, string> = {};
     if (API_KEY) headers['Authorization'] = `Bearer ${API_KEY}`;
     const res = await axios.get(`${BASE}/mountains`, { params: params as any, headers, timeout: 8000 });
     const arr = Array.isArray(res.data) ? res.data : (res.data?.mountains ?? []);
     const mountixResults = arr.map(normalizeMountain);
     allResults = allResults.concat(mountixResults);
+    console.log(`[searchMountains] Added ${mountixResults.length} Mountix mountains to results`);
   } catch (err: any) {
     console.error('[searchMountains] Mountix API failed:', err.message);
     // Mountixが失敗してもOSM結果があれば続行
@@ -177,6 +184,7 @@ export async function searchMountains(params: SearchParams = {}): Promise<Mounta
     }
   }
 
+  console.log(`[searchMountains] Final results: ${allResults.length} mountains`);
   return allResults;
 }
 

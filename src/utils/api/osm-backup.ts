@@ -28,24 +28,14 @@ export async function searchMountainsOSM(
   bbox?: [number, number, number, number],
   limit: number = 50
 ): Promise<OSMMountain[]> {
-  console.log(`[OSM] ==========`);
-  console.log(`[OSM] searchMountainsOSM called`);
-  console.log(`[OSM] query: "${query}"`);
-  console.log(`[OSM] limit: ${limit}`);
-  
   try {
     // 検索クエリを正規化
     const normalizedQuery = normalizeForSearch(query);
     const variants = generateSearchVariants(normalizedQuery);
-    
-    console.log(`[OSM] normalizedQuery: "${normalizedQuery}"`);
-    console.log(`[OSM] variants count: ${variants.length}`);
 
     // 日本全体のバウンディングボックス（デフォルト）
     const defaultBbox = [24, 123, 46, 146]; // [south, west, north, east]
     const searchBbox = bbox || defaultBbox;
-    
-    console.log(`[OSM] bbox: ${searchBbox.join(',')}`);
 
     // Overpass QLクエリを構築
     // natural=peak（山頂）を検索
@@ -62,9 +52,6 @@ out body ${limit};
 out skel qt;
     `.trim();
 
-    console.log(`[OSM] Sending request to ${OVERPASS_API}`);
-    console.log(`[OSM] Query preview: ${overpassQuery.substring(0, 150)}...`);
-
     const response = await axios.post(
       OVERPASS_API,
       overpassQuery,
@@ -74,12 +61,7 @@ out skel qt;
       }
     );
 
-    console.log(`[OSM] Response received`);
-    console.log(`[OSM] Status: ${response.status}`);
-    console.log(`[OSM] Elements count: ${response.data?.elements?.length || 0}`);
-
     if (!response.data?.elements) {
-      console.log('[OSM] No elements in response, returning empty array');
       return [];
     }
 
@@ -115,25 +97,9 @@ out skel qt;
         );
       });
 
-    console.log(`[OSM] After filtering: ${mountains.length} mountains`);
-    if (mountains.length > 0) {
-      console.log(`[OSM] First result: ${mountains[0].name} (elevation: ${mountains[0].elevation}m)`);
-    }
-    console.log(`[OSM] ==========`);
-
     return mountains;
   } catch (error: any) {
-    console.error('[OSM] ERROR occurred:');
-    console.error('[OSM] Error message:', error?.message || 'Unknown error');
-    if (error?.response) {
-      console.error('[OSM] Response status:', error.response.status);
-      console.error('[OSM] Response statusText:', error.response.statusText);
-      console.error('[OSM] Response data:', JSON.stringify(error.response.data).substring(0, 500));
-    }
-    if (error?.code) {
-      console.error('[OSM] Error code:', error.code);
-    }
-    console.error('[OSM] ==========');
+    console.error('[OSM] Search error:', error.message);
     return [];
   }
 }
